@@ -150,12 +150,91 @@ class CompareResult(BaseModel):
     text: str
     results: Dict[str, Dict[str, Any]]
 
+
+
 class Status(BaseModel):
     camel: Dict[str, Any]
     farasa: Dict[str, Any]
     stanza: Dict[str, Any]
 
+
+class Dependency(BaseModel):
+    head: Optional[int] = None
+    head_text: Optional[str] = None
+    deprel: Optional[str] = None
+
+
+class StanzaToken(BaseModel):
+    surface: str
+    lemma: Optional[str] = None
+    upos: Optional[str] = None
+    xpos: Optional[str] = None
+    gender: Optional[str] = None
+    number: Optional[str] = None
+    tense: Optional[str] = None
+    person: Optional[str] = None
+    voice: Optional[str] = None
+    case: Optional[str] = None
+    definite: Optional[str] = None
+    aspect: Optional[str] = None
+    dependency: Dependency
+
+
+
+
+class StanzaResponse(BaseModel):
+    input: str
+    word_count: int
+    tokens: List[StanzaToken]
+
+
+def parse_feats(feats: Optional[str]) -> Dict[str, Optional[str]]:
+    """Parse Stanza feats string into normalized dict."""
+    if not feats:
+        return {}
+    feat_dict = {}
+    for pair in feats.split('|'):
+        if '=' in pair:
+            key, val = pair.split('=', 1)
+            orig_key = key
+            key = key.lower()
+            val_lower = val.lower()
+            
+            # Value normalization
+            if 'gender' in key:
+                val = 'masc' if 'masc' in val_lower or 'm' in val_lower or val == 'M' else 'fem' if 'fem' in val_lower or 'f' in val_lower else val
+            elif 'number' in key or 'num' in key:
+                val = 'sing' if 'sing' in val_lower or 's' in val_lower else 'dual' if 'dual' in val_lower or 'd' in val_lower else 'plur' if 'plur' in val_lower or 'p' in val_lower else val
+            elif 'aspect' in key:
+                if 'perf' in val_lower:
+                    feat_dict['aspect'] = 'perf'
+                    feat_dict['tense'] = 'perf'  # Map to tense as per example
+                elif 'impf' in val_lower or 'imperf' in val_lower:
+                    feat_dict['aspect'] = 'impf'
+                    feat_dict['tense'] = 'impf'
+                else:
+                    feat_dict['aspect'] = val.lower()
+            elif 'voice' in key:
+                val = 'act' if 'act' in val_lower else 'pass' if 'pass' in val_lower else val.lower()
+            elif 'case' in key:
+                val = val.lower()[:3]  # nom, acc, gen
+            elif 'definite' in key or 'def' in key:
+                val = 'yes' if val_lower in ('yes', 'true', 'def') else 'no' if val_lower in ('no', 'ind') else val
+            elif 'person' in key or 'pers' in key:
+                val = str(val)  # 1,2,3
+            else:
+                val = val.lower()
+            
+            feat_dict[key] = val
+    return feat_dict
+
+
 # Tool Functions
+
+
+
+
+
 def camel_analyze(text: str) -> Dict[str, Any]:
     if not camel_disambiguator or not camel_db:
         return {"status": "failed", "error": "CAMeL not loaded", "tokens": []}
@@ -206,32 +285,38 @@ def farasa_analyze(text: str) -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "error": str(e), "tokens": []}
 
-def stanza_analyze(text: str) -> Dict[str, Any]:
+def stanza_analyze(text: str) -> StanzaResponse:
     if not stanza_pipeline:
-        return {"status": "failed", "error": "Stanza not loaded", "tokens": []}
-    try:
-        doc = stanza_pipeline(text)
-        token_outputs = []
-        for sentence in doc.sentences:
-            for word in sentence.words:
-                analyses = [MorphAnalysis(
-    lemma=word.lemma,
-    root=None,
-    root_type=None,
-    pos=word.xpos or word.upos,
-    gender=None,
-    number=None,
-    tense=None,
-    gloss=word.feats,
-    confidence=1.0,
-    confidence_level="high",
-    corrections=[]
-)]
-                token_outputs.append(TokenOutput(surface=word.text, analyses=analyses, segmentation=[word.text]))
-                logger.info(f"Stanza: {word.text} -> lemma:{word.lemma} pos:{word.upos} head:{word.head} deprel:{word.deprel}")
-        return {"status": "ok", "tokens": token_outputs}
-    except Exception as e:
-        return {"status": "error", "error": str(e), "tokens": []}
+        raise ValueError("Stanza not loaded")
+    doc = stanza_pipeline(text)
+    tokens = []
+    for sentence in doc.sentences:
+        for i, word in enumerate(sentence.words):
+            feats = parse_feats(word.feats)
+            head = int(word.head) if word.head and word.head != '0' else None
+            head_text = None
+            if head and 1 <= head <= len(sentence.words):
+                head_text = sentence.words[head - 1].text
+            elif head == 0:
+                head_text = "root"
+            dependency = Dependency(head=head, head_text=head_text, deprel=word.deprel)
+            stanza_token = StanzaToken(
+                surface=word.text,
+                lemma=word.lemma,
+                upos=word.upos,
+                xpos=word.xpos,
+                gender=feats.get('gender'),
+                number=feats.get('number'),
+                tense=feats.get('tense'),
+                person=feats.get('person'),
+                voice=feats.get('voice'),
+                case=feats.get('case'),
+                definite=feats.get('definite'),
+                aspect=feats.get('aspect'),
+                dependency=dependency
+            )
+            tokens.append(stanza_token)
+    return StanzaResponse(input=text, word_count=len(tokens), tokens=tokens)
 
 # Endpoints
 @app.get("/", response_model=Status)
@@ -250,7 +335,7 @@ def analyze_combined(text: str):
     farasa_res = farasa_analyze(text)
     return {"camel": camel_res, "farasa": farasa_res}
 
-@app.get("/analyze-stanza", response_model=Dict[str, Any])
+@app.get("/analyze-stanza", response_model=StanzaResponse)
 def analyze_stanza_endpoint(text: str):
     if not text.strip():
         raise HTTPException(400, "Empty text")
