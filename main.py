@@ -1,116 +1,68 @@
-# ============================================================
-# Arabic NLP Comparative Platform (v5.2 - Final)
-# ============================================================
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import logging
 import re
+import os
 
 from camel_tools.morphology.database import MorphologyDB
 from camel_tools.disambig.mle import MLEDisambiguator
 from camel_tools.tokenizers.word import simple_word_tokenize
 from farasa.segmenter import FarasaSegmenter
+import stanza
 
-# ============================================================
 # Logging
-# ============================================================
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ============================================================
 # App
-# ============================================================
-
-app = FastAPI(
-    title="Arabic NLP Comparative Platform",
-    version="5.2"
-)
-
+app = FastAPI(title="Arabic NLP Platform", version="6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============================================================
-# Load Resources
-# ============================================================
-
+# Load Resources with Graceful Fallbacks
 logger.info("Loading NLP resources...")
 
-db = MorphologyDB.builtin_db()
-disambiguator = MLEDisambiguator.pretrained()
-farasa_segmenter = FarasaSegmenter(interactive=False)
+camel_db = None
+camel_disambiguator = None
+try:
+    camel_db = MorphologyDB.builtin_db()
+    camel_disambiguator = MLEDisambiguator.pretrained()
+    logger.info("✅ CAMeL Tools loaded")
+except Exception as e:
+    logger.error(f"❌ CAMeL failed: {e}")
 
-logger.info("Resources loaded successfully")
+farasa_segmenter = None
+try:
+   farasa_segmenter = FarasaSegmenter(interactive=False)
+   logger.info("✅ Farasa loaded from ./Farasa_bin")
+except Exception as e:
+    logger.error(f"❌ Farasa failed: {e}")
+    
+stanza_pipeline = None
+try:
+    stanza_pipeline = stanza.Pipeline(
+        'ar',
+        processors='tokenize,mwt,pos,lemma,depparse',
+        verbose=False
+    )
+    logger.info("✅ Stanza loaded")
+except Exception as e:
+    logger.error(f"❌ Stanza failed: {e}")
+    logger.info("Resource loading complete")
 
-# ============================================================
-# Maps
-# ============================================================
-
-ASPECT_MAP = {"p": "past", "i": "present", "c": "imperative", "na": None}
-GENDER_MAP = {"m": "masculine", "f": "feminine", "na": None}
-NUMBER_MAP = {"s": "singular", "d": "dual", "p": "plural", "na": None}
-
-POS_MAP = {
-    "noun": "NOUN",
-    "verb": "VERB",
-    "adj": "ADJECTIVE",
-    "prep": "ADPOSITION",
-    "pron": "PRONOUN",
-    "adv": "ADVERB",
-    "conj": "CONJUNCTION",
-    "part": "PARTICLE",
-    "punc": "PUNCTUATION"
-}
-
-# ============================================================
-# Weak Verb Root Augmentation Table
-# ============================================================
-
+# Post-Processing Tables (Exact from Original)
 WEAK_VERB_ROOTS = {
-    # قال - قول (to say)
-    "ق.ل": "ق.و.ل",
-    
-    # باع - بيع (to sell)
-    "ب.ع": "ب.ي.ع",
-    
-    # نام - نوم (to sleep)
-    "ن.م": "ن.و.م",
-    
-    # صام - صوم (to fast)
-    "ص.م": "ص.و.م",
-    
-    # خاف - خوف (to fear)
-    "خ.ف": "خ.و.ف",
-    
-    # زار - زور (to visit)
-    "ز.ر": "ز.و.ر",
-    
-    # طار - طير (to fly)
-    "ط.ر": "ط.ي.ر",
-    
-    # سار - سير (to walk)
-    "س.ر": "س.ي.ر",
-    
-    # عاد - عود (to return)
-    "ع.د": "ع.و.د",
-    
-    # جاء - جيء (to come)
-    "ج.ء": "ج.ي.ء",
-    
-    # شاء - شيء (to wish)
-    "ش.ء": "ش.ي.ء",
+    "ق.ل": "ق.و.ل", "ب.ع": "ب.ي.ع", "ن.م": "ن.و.م", "ص.م": "ص.و.م",
+    "خ.ف": "خ.و.ف", "ز.ر": "ز.و.ر", "ط.ر": "ط.ي.ر", "س.ر": "س.ي.ر",
+    "ع.د": "ع.و.د", "ج.ء": "ج.ي.ء", "ش.ء": "ش.ي.ء"
 }
-
-# ============================================================
-# Single-letter particles (common prepositions/conjunctions)
-# ============================================================
 
 SINGLE_LETTER_PARTICLES = {
     "ب": {"root": "ب", "gloss": "with/by", "pos": "ADPOSITION"},
@@ -120,299 +72,207 @@ SINGLE_LETTER_PARTICLES = {
     "ك": {"root": "ك", "gloss": "like/as", "pos": "ADPOSITION"},
 }
 
-# ============================================================
-# Schemas
-# ============================================================
+ASPECT_MAP = {"p": "past", "i": "present", "c": "imperative", "na": None}
+GENDER_MAP = {"m": "masculine", "f": "feminine", "na": None}
+NUMBER_MAP = {"s": "singular", "d": "dual", "p": "plural", "na": None}
+POS_MAP = {
+    "noun": "NOUN", "verb": "VERB", "adj": "ADJECTIVE", "prep": "ADPOSITION",
+    "pron": "PRONOUN", "adv": "ADVERB", "conj": "CONJUNCTION",
+    "part": "PARTICLE", "punc": "PUNCTUATION"
+}
 
+# Post-Processing Functions (Exact Logic)
+def map_pos(pos: Optional[str]) -> Optional[str]:
+    return POS_MAP.get(pos, pos.upper()) if pos else None
+
+def clean_root(root: Optional[str]) -> Optional[str]:
+    return root.replace("#.", "").replace(".#", "").strip() if root else None
+
+def confidence_bucket(score: float) -> str:
+    if score >= 0.9: return "high"
+    elif score >= 0.6: return "medium"
+    return "low"
+
+def simplify_gloss(gloss: Optional[str]) -> Optional[str]:
+    if not gloss: return None
+    simplified = re.sub(r'[\[\]().;]', '', gloss.split(";")[0]).strip()
+    simplified = simplified.replace("the+", "").replace("+", " ").replace("_", " ")
+    words = simplified.split()
+    noise = {"my", "your", "his", "her", "its", "our", "their", "i", "me", "you", "he", "him", "she", "it", "us", "them", "we", "the", "a", "an", "of", "for", "with", "that", "which", "who", "whose", "what"}
+    clean_words = [w for w in words if w.lower() not in noise]
+    result = " ".join(clean_words).strip()
+    return result if result else None
+
+def augment_root(root: str, lemma: str, pos: str, surface: str = "") -> tuple[str, str, Optional[str]]:
+    if not root: return root, "unknown", None
+    if surface in SINGLE_LETTER_PARTICLES:
+        p = SINGLE_LETTER_PARTICLES[surface]
+        return p["root"], "monoliteral", p["gloss"]
+    parts = root.split(".")
+    if len(parts) >= 3: return root, "triliteral", None
+    if len(parts) == 2 and pos == "verb" and root in WEAK_VERB_ROOTS:
+        return WEAK_VERB_ROOTS[root], "triliteral_weak", None
+    if len(parts) == 2: return root, "biliteral", None
+    if len(parts) == 1: return root, "monoliteral", None
+    return root, "unknown", None
+
+def correct_number(surface: str, number: str, segmentation: List[str], pos: str) -> tuple[str, bool]:
+    if not number or pos != "NOUN": return number, False
+    if number == "dual" and surface.endswith("تي") and len(segmentation) >= 2 and segmentation[-2] == "ت" and segmentation[-1] == "ي":
+        return "singular", True
+    return number, False
+
+# Pydantic Models
 class MorphAnalysis(BaseModel):
     lemma: Optional[str]
     root: Optional[str]
     root_type: Optional[str]
-    part_of_speech: Optional[str]
+    pos: Optional[str]
     gender: Optional[str]
     number: Optional[str]
     tense: Optional[str]
-    english_gloss: Optional[str]
-    confidence_score: float
+    gloss: Optional[str]
+    confidence: float
     confidence_level: str
     corrections: List[str]
 
-
 class TokenOutput(BaseModel):
-    surface_form: str
-    morphology: List[MorphAnalysis]
+    surface: str
+    analyses: List[MorphAnalysis]
     segmentation: List[str]
-    analysis_count: int
 
-
-class CombinedResponse(BaseModel):
-    input_sentence: str
-    word_count: int
+class AnalysisResult(BaseModel):
+    tool: str
     tokens: List[TokenOutput]
+    status: str
 
-# ============================================================
-# Helpers
-# ============================================================
+class CompareResult(BaseModel):
+    text: str
+    results: Dict[str, Dict[str, Any]]
 
-def map_pos(pos: Optional[str]) -> Optional[str]:
-    """Map CAMeL POS to unified format"""
-    if not pos:
-        return None
-    return POS_MAP.get(pos, pos.upper())
+class Status(BaseModel):
+    camel: Dict[str, Any]
+    farasa: Dict[str, Any]
+    stanza: Dict[str, Any]
 
-
-def clean_root(root: Optional[str]) -> Optional[str]:
-    """Remove CAMeL internal markers"""
-    if not root:
-        return None
-    return root.replace("#.", "").replace(".#", "").strip()
-
-
-def confidence_bucket(score: float) -> str:
-    """Categorize confidence score"""
-    if score >= 0.9:
-        return "high"
-    elif score >= 0.6:
-        return "medium"
-    return "low"
-
-
-def simplify_gloss(gloss: Optional[str]) -> Optional[str]:
-    """Clean English gloss aggressively"""
-    if not gloss:
-        return None
-
-    simplified = gloss.split(";")[0].strip()
-    simplified = re.sub(r'\[.*?\]', '', simplified)
-    simplified = re.sub(r'\(.*?\)', '', simplified)
-    simplified = simplified.replace("the+", "")
-    simplified = simplified.replace("+", " ")
-    simplified = simplified.replace("_", " ")
-
-    noise_words = {
-        "my", "your", "his", "her", "its", "our", "their",
-        "i", "me", "you", "he", "him", "she", "it", "us", "them", "we",
-        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "the", "a", "an",
-        "of", "for", "with",
-        "that", "which", "who", "whose", "what"
-    }
-
-    words = simplified.split()
-    
-    # Keep single-word prepositions
-    if len(words) == 1:
-        return simplified.strip() if simplified.strip() else None
-    
-    clean_words = [w for w in words if w.lower() not in noise_words]
-    result = " ".join(clean_words)
-    result = re.sub(r'\s+', ' ', result).strip()
-    
-    return result if result else None
-
-# ============================================================
-# Post-Processing - Root Augmentation
-# ============================================================
-
-def augment_root(root: str, lemma: str, pos: str, surface: str = "") -> tuple[str, str, Optional[str]]:
-    """
-    Augment roots and handle special cases.
-    Returns: (augmented_root, root_type, corrected_gloss)
-    """
-    if not root:
-        return root, "unknown", None
-    
-    # Special case: single-letter particles
-    if surface in SINGLE_LETTER_PARTICLES:
-        particle = SINGLE_LETTER_PARTICLES[surface]
-        return particle["root"], "monoliteral", particle["gloss"]
-    
-    parts = root.split(".")
-    
-    # Already triliteral+
-    if len(parts) >= 3:
-        return root, "triliteral", None
-    
-    # Biliteral verb → lookup table
-    if len(parts) == 2 and pos == "verb":
-        if root in WEAK_VERB_ROOTS:
-            augmented = WEAK_VERB_ROOTS[root]
-            logger.info(f"Root augmented: {root} → {augmented}")
-            return augmented, "triliteral_weak", None
-        else:
-            return root, "biliteral_weak", None
-    
-    # Biliteral particle
-    if len(parts) == 2:
-        return root, "biliteral", None
-    
-    # Monoliteral
-    if len(parts) == 1:
-        return root, "monoliteral", None
-    
-    return root, "unknown", None
-
-# ============================================================
-# Post-Processing - Number Correction
-# ============================================================
-
-def correct_number(surface: str, number: str, segmentation: List[str], pos: str) -> tuple[str, bool]:
-    """Fix dual misclassification for possessives"""
-    if not number or pos != "NOUN":
-        return number, False
-    
-    if number == "dual" and surface.endswith("تي"):
-        if len(segmentation) >= 2 and segmentation[-2] == "ت" and segmentation[-1] == "ي":
-            logger.info(f"Number corrected: {surface} dual → singular")
-            return "singular", True
-    
-    return number, False
-
-# ============================================================
-# Core Logic
-# ============================================================
-
-def run_camel_analysis(text: str, segmentation_map: dict) -> List[List[MorphAnalysis]]:
-    """Run CAMeL with post-processing"""
-    tokens = simple_word_tokenize(text)
-    disambig_results = disambiguator.disambiguate(tokens)
-
-    all_results = []
-
-    for token, disambig in zip(tokens, disambig_results):
-        token_analyses = []
-        token_segments = segmentation_map.get(token, [token])
-
-        for analysis_obj in disambig.analyses[:2]:
-            features = analysis_obj.analysis
-            score = round(analysis_obj.score, 4)
-            
-            raw_root = clean_root(features.get("root"))
-            raw_number = NUMBER_MAP.get(features.get("num"))
-            raw_pos = features.get("pos")
-            raw_lemma = features.get("lex")
-            raw_gloss = features.get("gloss")
-            
-            corrections = []
-            
-            # Root augmentation (with particle handling)
-            augmented_root, root_type, particle_gloss = augment_root(
-                raw_root, 
-                raw_lemma, 
-                raw_pos,
-                token
-            )
-            
-            # Gloss handling
-            if particle_gloss:
-                # Use special particle gloss
-                clean_gloss = particle_gloss
-                corrections.append("gloss")
-                if augmented_root != raw_root:
-                    corrections.append("root")
-            else:
-                # Normal gloss cleaning
-                clean_gloss = simplify_gloss(raw_gloss)
-                if clean_gloss != raw_gloss:
-                    corrections.append("gloss")
-                if augmented_root != raw_root:
-                    corrections.append("root")
-            
-            # Number correction
-            corrected_number, num_fixed = correct_number(
-                token, raw_number, token_segments, map_pos(raw_pos)
-            )
-            if num_fixed:
-                corrections.append("number")
-
-            token_analyses.append(
-                MorphAnalysis(
-                    lemma=raw_lemma,
-                    root=augmented_root,
-                    root_type=root_type,
-                    part_of_speech=map_pos(raw_pos),
-                    gender=GENDER_MAP.get(features.get("gen")),
-                    number=corrected_number,
-                    tense=ASPECT_MAP.get(features.get("asp")),
-                    english_gloss=clean_gloss,
-                    confidence_score=score,
-                    confidence_level=confidence_bucket(score),
-                    corrections=corrections
-                )
-            )
-
-        all_results.append(token_analyses)
-
-    return all_results
-
-
-def run_farasa_segmentation(text: str) -> tuple[List[List[str]], dict]:
-    """Run Farasa segmentation"""
-    segmented_text = farasa_segmenter.segment(text)
-    tokens = simple_word_tokenize(text)
-    raw_segments = segmented_text.split()
-
-    aligned_segments = []
-    segment_map = {}
-
-    for token, raw_seg in zip(tokens, raw_segments):
-        parts = [p for p in raw_seg.split("+") if p]
-        aligned_segments.append(parts if parts else [raw_seg])
-        segment_map[token] = parts if parts else [raw_seg]
-
-    return aligned_segments, segment_map
-
-# ============================================================
-# Endpoints
-# ============================================================
-
-@app.get("/analyze-combined", response_model=CombinedResponse)
-def analyze_combined(text: str):
-    """Combined analysis with intelligent post-processing"""
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Input text is empty")
-
+# Tool Functions
+def camel_analyze(text: str) -> Dict[str, Any]:
+    if not camel_disambiguator or not camel_db:
+        return {"status": "failed", "error": "CAMeL not loaded", "tokens": []}
     try:
-        farasa_segments, segment_map = run_farasa_segmentation(text)
-        camel_results = run_camel_analysis(text, segment_map)
-
-        tokens_output = []
-        surface_tokens = simple_word_tokenize(text)
-
-        for surface, morph_list, segs in zip(surface_tokens, camel_results, farasa_segments):
-            tokens_output.append(
-                TokenOutput(
-                    surface_form=surface,
-                    morphology=morph_list,
-                    segmentation=segs,
-                    analysis_count=len(morph_list)
-                )
-            )
-
-        return CombinedResponse(
-            input_sentence=text,
-            word_count=len(tokens_output),
-            tokens=tokens_output
-        )
-
+        tokens = simple_word_tokenize(text)
+        results = camel_disambiguator.disambiguate(tokens)
+        token_outputs = []
+        for token, disambig in zip(tokens, results):
+            analyses = []
+            segs = [token]
+            for a in disambig.analyses[:3]:
+                features = a.analysis
+                score = round(a.score, 4)
+                raw_root = clean_root(features.get("root"))
+                raw_pos = features.get("pos")
+                raw_lemma = features.get("lex")
+                raw_gloss = features.get("gloss")
+                aug_root, root_type, part_gloss = augment_root(raw_root or "", raw_lemma or "", raw_pos or "", token)
+                clean_gloss = part_gloss or simplify_gloss(raw_gloss)
+                corrections = []
+                if aug_root != raw_root: corrections.append("root")
+                if clean_gloss != raw_gloss: corrections.append("gloss")
+                corrected_num, num_fixed = correct_number(token, NUMBER_MAP.get(features.get("num")), segs, map_pos(raw_pos))
+                if num_fixed: corrections.append("number")
+                analyses.append(MorphAnalysis(
+                    lemma=raw_lemma, root=aug_root, root_type=root_type, pos=map_pos(raw_pos),
+                    gender=GENDER_MAP.get(features.get("gen")), number=corrected_num,
+                    tense=ASPECT_MAP.get(features.get("asp")), gloss=clean_gloss,
+                    confidence=score, confidence_level=confidence_bucket(score), corrections=corrections
+                ))
+            token_outputs.append(TokenOutput(surface=token, analyses=analyses, segmentation=segs))
+        return {"status": "ok", "tokens": token_outputs}
     except Exception as e:
-        logger.error(f"Processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "error": str(e), "tokens": []}
 
+def farasa_analyze(text: str) -> Dict[str, Any]:
+    if not farasa_segmenter:
+        return {"status": "failed", "error": "Farasa not loaded", "tokens": []}
+    try:
+        segmented = farasa_segmenter.segment(text)
+        raw_tokens = simple_word_tokenize(text)
+        raw_segs = segmented.split()
+        token_outputs = []
+        for token, seg in zip(raw_tokens, raw_segs):
+            parts = seg.split('+')
+            token_outputs.append(TokenOutput(surface=token, analyses=[], segmentation=parts))
+        return {"status": "ok", "tokens": token_outputs, "segmented_text": segmented}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "tokens": []}
 
-@app.get("/")
-def home():
-    return {
-        "message": "Arabic NLP Platform v5.2 - Production Ready",
-        "features": [
-            "Weak verb root augmentation via lookup table",
-            "Single-letter particle handling",
-            "Number correction for possessives",
-            "Aggressive gloss cleaning",
-            "Comprehensive correction tracking"
-        ],
-        "stats": {
-            "weak_verbs_supported": len(WEAK_VERB_ROOTS),
-            "particles_supported": len(SINGLE_LETTER_PARTICLES)
-        }
-    }
+def stanza_analyze(text: str) -> Dict[str, Any]:
+    if not stanza_pipeline:
+        return {"status": "failed", "error": "Stanza not loaded", "tokens": []}
+    try:
+        doc = stanza_pipeline(text)
+        token_outputs = []
+        for sentence in doc.sentences:
+            for word in sentence.words:
+                analyses = [MorphAnalysis(
+    lemma=word.lemma,
+    root=None,
+    root_type=None,
+    pos=word.xpos or word.upos,
+    gender=None,
+    number=None,
+    tense=None,
+    gloss=word.feats,
+    confidence=1.0,
+    confidence_level="high",
+    corrections=[]
+)]
+                token_outputs.append(TokenOutput(surface=word.text, analyses=analyses, segmentation=[word.text]))
+                logger.info(f"Stanza: {word.text} -> lemma:{word.lemma} pos:{word.upos} head:{word.head} deprel:{word.deprel}")
+        return {"status": "ok", "tokens": token_outputs}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "tokens": []}
+
+# Endpoints
+@app.get("/", response_model=Status)
+def root():
+    return Status(
+        camel={"status": "ok" if camel_disambiguator else "failed"},
+        farasa={"status": "ok" if farasa_segmenter else "failed"},
+        stanza={"status": "ok" if stanza_pipeline else "failed"}
+    )
+
+@app.get("/analyze-combined", response_model=Dict[str, Any])
+def analyze_combined(text: str):
+    if not text.strip():
+        raise HTTPException(400, "Empty text")
+    camel_res = camel_analyze(text)
+    farasa_res = farasa_analyze(text)
+    return {"camel": camel_res, "farasa": farasa_res}
+
+@app.get("/analyze-stanza", response_model=Dict[str, Any])
+def analyze_stanza_endpoint(text: str):
+    if not text.strip():
+        raise HTTPException(400, "Empty text")
+    return stanza_analyze(text)
+
+@app.get("/compare", response_model=Dict[str, Any])
+def compare(
+    text: str,
+    tools: str = Query("camel,farasa,stanza")
+):
+    if not text.strip():
+        raise HTTPException(400, "Empty text")
+    tool_list = [t.strip() for t in tools.split(",")]
+    results = {}
+    if "camel" in tool_list:
+        results["camel"] = camel_analyze(text)
+    if "farasa" in tool_list:
+        results["farasa"] = farasa_analyze(text)
+    if "stanza" in tool_list:
+        results["stanza"] = stanza_analyze(text)
+    return {"text": text, "tools": tool_list, "results": results}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
