@@ -1,417 +1,326 @@
 <template>
-  <div class="container">
-    <h1 class="page-title">Compare Tools</h1>
+  <div class="page-wrap compare-page">
+    <section class="hero-band compact-hero">
+      <span class="eyebrow">Comparison view</span>
+      <h1 class="hero-title">Compare Tool Decisions</h1>
+      <p class="hero-copy">
+        Review token-level differences between CAMeL, Stanza, Farasa, and Qalsadi without
+        requiring a separate evaluation endpoint.
+      </p>
+    </section>
 
-    <div class="card input-card">
-      <label class="input-label">Enter Arabic Text:</label>
+    <section class="panel panel-pad input-panel">
+      <div class="input-head">
+        <div>
+          <h2 class="section-title">Arabic Input</h2>
+          <p class="section-subtitle">The comparison uses the combined analysis endpoint.</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" v-model="showDetails" />
+          <span>Show lemmas and stems</span>
+        </label>
+      </div>
+
       <textarea
         v-model="inputText"
-        class="arabic text-input"
+        class="textarea arabic"
         dir="rtl"
         placeholder="اكتب النص العربي هنا..."
-        rows="4"
       ></textarea>
-      <div class="input-actions">
-        <button
-          class="btn btn-primary"
-          @click="compare"
-          :disabled="loading || !inputText.trim()"
-        >
-          {{ loading ? 'جاري المقارنة...' : 'Compare' }}
+
+      <div class="actions-row form-actions">
+        <button class="btn btn-primary" :disabled="loading || !inputText.trim()" @click="compare">
+          {{ loading ? 'Comparing...' : 'Compare Tools' }}
         </button>
-        <button class="btn btn-clear" @click="clear">Clear</button>
+        <button class="btn btn-secondary" @click="loadSample">Sample</button>
+        <button class="btn btn-secondary" @click="clear">Clear</button>
       </div>
-    </div>
+    </section>
 
-    <div v-if="loading" class="loading"><div class="spinner"></div> Comparing...</div>
-    <div v-if="error" class="error-msg">{{ error }}</div>
+    <div v-if="loading" class="loading-state">Comparing token outputs...</div>
+    <div v-if="error" class="error-state">{{ error }}</div>
 
-    <!-- Comparison Table -->
-    <div v-if="results && !loading" class="card">
-      <h2 class="tool-title">Token-by-Token Comparison</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Word</th>
-              <th class="th-camel">CAMeL Lemma</th>
-              <th class="th-camel">CAMeL POS</th>
-              <th class="th-stanza">Stanza Lemma</th>
-              <th class="th-stanza">Stanza UPOS</th>
-              <th class="th-farasa">Farasa Segments</th>
-              <th>Agreement?</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in compareRows" :key="row.surface">
-              <td class="arabic surface-cell">{{ row.surface }}</td>
-              <!-- CAMeL -->
-              <td class="arabic">{{ row.camel?.lemma || '—' }}</td>
-              <td>
-                <span :class="posBadge(row.camel?.pos)">{{ row.camel?.pos || '—' }}</span>
-              </td>
-              <!-- Stanza -->
-              <td class="arabic">{{ row.stanza?.lemma || '—' }}</td>
-              <td>
-                <span :class="posBadge(row.stanza?.upos)">{{ row.stanza?.upos || '—' }}</span>
-              </td>
-              <!-- Farasa -->
-              <td>
-                <span class="farasa-seg">{{ row.farasa_segments || '—' }}</span>
-              </td>
-              <!-- Agreement -->
-              <td>
-                <span :class="row.agree ? 'agree-badge agree-yes' : 'agree-badge agree-no'">
-                  {{ row.agree ? '✅ Agree' : '❌ Disagree' }}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <section v-if="results && !loading" class="comparison-results">
+      <div class="metrics-grid">
+        <article class="panel panel-pad metric">
+          <strong>{{ metrics.posAgreement }}%</strong>
+          <span>POS agreement</span>
+        </article>
+        <article class="panel panel-pad metric">
+          <strong>{{ metrics.lemmaAgreement }}%</strong>
+          <span>Lemma agreement</span>
+        </article>
+        <article class="panel panel-pad metric">
+          <strong>{{ metrics.tokens }}</strong>
+          <span>Compared tokens</span>
+        </article>
+        <article class="panel panel-pad metric">
+          <strong>{{ metrics.qalsadiTokens }}</strong>
+          <span>Qalsadi tokens</span>
+        </article>
       </div>
-    </div>
 
-    <!-- Evaluation Metrics - FIX BUG 1: No double % -->
-    <div v-if="metrics && !loading" class="metrics-grid">
-      <div class="card metric-card metric-pos">
-        <div class="metric-icon">🎯</div>
-        <!-- FIX: Use directly, no extra % -->
-        <div class="metric-value">{{ metrics.pos_agreement_pct || '—' }}</div>
-        <div class="metric-label">POS Agreement</div>
-      </div>
-      <div class="card metric-card metric-lemma">
-        <div class="metric-icon">📖</div>
-        <!-- FIX: Use directly, no extra % -->
-        <div class="metric-value">{{ metrics.lemma_match_pct || '—' }}</div>
-        <div class="metric-label">Lemma Match</div>
-      </div>
-      <div class="card metric-card metric-f1">
-        <div class="metric-icon">📊</div>
-        <!-- FIX: pos_f1 is decimal, multiply by 100 -->
-        <div class="metric-value">{{ formatF1(metrics.pos_f1) }}</div>
-        <div class="metric-label">F1 Score</div>
-      </div>
-      <div class="card metric-card metric-coverage">
-        <div class="metric-icon">✅</div>
-        <!-- FIX: segmentation_coverage is decimal, multiply by 100 -->
-        <div class="metric-value">{{ formatCoverage(metrics.segmentation_coverage) }}</div>
-        <div class="metric-label">Segmentation Coverage</div>
-      </div>
-    </div>
-    
-    <!-- Loading state for metrics -->
-    <div v-else-if="loading" class="metrics-grid">
-      <div class="card metric-card">
-        <div class="metric-loading">Loading...</div>
-      </div>
-      <div class="card metric-card">
-        <div class="metric-loading">Loading...</div>
-      </div>
-      <div class="card metric-card">
-        <div class="metric-loading">Loading...</div>
-      </div>
-      <div class="card metric-card">
-        <div class="metric-loading">Loading...</div>
-      </div>
-    </div>
+      <article class="panel panel-pad">
+        <div class="result-head">
+          <div>
+            <h2 class="section-title">Token Comparison</h2>
+            <p class="section-subtitle">Rows are aligned by token index from the combined result.</p>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Word</th>
+                <th>CAMeL POS</th>
+                <th>Stanza POS</th>
+                <th>Qalsadi POS</th>
+                <th>Farasa Segments</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="row in rows" :key="row.index">
+                <tr>
+                  <td class="arabic word-cell" dir="rtl">{{ row.word }}</td>
+                  <td><span :class="posClass(row.camel.pos)">{{ value(row.camel.pos) }}</span></td>
+                  <td><span :class="posClass(row.stanza.pos)">{{ value(row.stanza.pos) }}</span></td>
+                  <td><span :class="posClass(row.qalsadi.pos)">{{ value(row.qalsadi.pos) }}</span></td>
+                  <td class="segments">{{ row.farasa.segments || '-' }}</td>
+                  <td>
+                    <span :class="row.agrees ? 'pill pill-green' : 'pill pill-red'">
+                      {{ row.agrees ? 'Agree' : 'Review' }}
+                    </span>
+                  </td>
+                </tr>
+                <tr v-if="showDetails" class="detail-row">
+                  <td></td>
+                  <td>
+                    <strong>Lemma:</strong> {{ value(row.camel.lemma) }}<br />
+                    <strong>Root:</strong> {{ value(row.camel.root) }}
+                  </td>
+                  <td>
+                    <strong>Lemma:</strong> {{ value(row.stanza.lemma) }}<br />
+                    <strong>Root:</strong> -
+                  </td>
+                  <td>
+                    <strong>Lemma:</strong> {{ value(row.qalsadi.lemma) }}<br />
+                    <strong>Stem:</strong> {{ value(row.qalsadi.stem) }}
+                  </td>
+                  <td colspan="2">
+                    <strong>Arabic POS:</strong> {{ value(row.qalsadi.posAr) }}
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
 import axios from 'axios'
 
-const route = useRoute()
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
 const results = ref(null)
-const metrics = ref(null)
-
-onMounted(() => {
-  if (route.query.text) {
-    inputText.value = route.query.text
-    compare()
-  }
-})
-
-watch(() => route.query.text, (newText) => {
-  if (newText) {
-    inputText.value = newText
-    compare()
-  }
-})
+const showDetails = ref(false)
 
 async function compare() {
   if (!inputText.value.trim()) return
   loading.value = true
   error.value = ''
   results.value = null
-  metrics.value = null
 
   try {
-    // Get analysis results
-    const [analysisRes, metricsRes] = await Promise.all([
-      axios.get('http://127.0.0.1:8000/analyze-combined', {
-        params: { text: inputText.value }
-      }),
-      axios.get('http://127.0.0.1:8000/evaluate', {
-        params: { text: inputText.value }
-      })
-    ])
-
-    results.value = analysisRes.data
-    // Map evaluation response fields
-    const evalData = metricsRes.data.evaluation || metricsRes.data
-    metrics.value = {
-      pos_agreement_pct: evalData.pos_agreement_pct,
-      lemma_match_pct: evalData.lemma_match_pct,
-      pos_f1: evalData.pos_f1,
-      segmentation_coverage: evalData.segmentation_coverage
-    }
-  } catch (e) {
-    error.value = 'Failed to connect to backend.'
+    const { data } = await axios.get(`${API}/analyze-combined`, {
+      params: { text: inputText.value },
+      timeout: 120000,
+    })
+    results.value = data
+  } catch {
+    error.value = 'Failed to connect to the backend. Start the FastAPI server and try again.'
   } finally {
     loading.value = false
   }
 }
 
-function clear() {
-  inputText.value = ''
-  results.value = null
-  metrics.value = null
-  error.value = ''
-}
+const rows = computed(() => {
+  const camel = results.value?.camel?.tokens || []
+  const stanza = results.value?.stanza?.tokens || []
+  const farasa = results.value?.farasa?.tokens || []
+  const qalsadi = results.value?.qalsadi?.tokens || []
+  const max = Math.max(camel.length, stanza.length, farasa.length, qalsadi.length)
 
-const compareRows = computed(() => {
-  if (!results.value) return []
-
-  const camelTokens = results.value.camel?.tokens || []
-  const farasaTokens = results.value.farasa?.tokens || []
-  const stanzaTokens = results.value.stanza?.tokens || []
-
-  return camelTokens.map((ct, i) => {
-    const camelPOS = ct.analyses?.[0]?.pos || ''
-    const stanzaPOS = stanzaTokens[i]?.upos || ''
-    const agree = normalizePOS(camelPOS) === normalizePOS(stanzaPOS)
-    
-    // Get segmentation array and join with "+"
-    const farasaSeg = farasaTokens[i]?.segmentation
-    const farasaSegmentsStr = (farasaSeg && farasaSeg.length > 0) 
-      ? farasaSeg.join('+') 
-      : ''
+  return Array.from({ length: max }, (_, index) => {
+    const camelToken = camel[index]
+    const camelBest = camelToken?.analyses?.[0] || {}
+    const stanzaToken = stanza[index] || {}
+    const farasaToken = farasa[index] || {}
+    const qalsadiToken = qalsadi[index] || {}
+    const word = camelToken?.surface || stanzaToken.surface || farasaToken.surface || qalsadiToken.surface || `#${index + 1}`
+    const posValues = [camelBest.pos, stanzaToken.upos, qalsadiToken.pos].filter(Boolean).map(normalizePos)
+    const uniquePos = [...new Set(posValues)]
 
     return {
-      surface: ct.surface,
-      camel: ct.analyses?.[0] || null,
-      farasa_segments: farasaSegmentsStr,
-      stanza: stanzaTokens[i] || null,
-      agree
+      index,
+      word,
+      camel: { pos: camelBest.pos, lemma: camelBest.lemma, root: camelBest.root },
+      stanza: { pos: stanzaToken.upos, lemma: stanzaToken.lemma },
+      farasa: { segments: farasaToken.segmentation?.join(' + ') },
+      qalsadi: {
+        pos: qalsadiToken.pos,
+        lemma: qalsadiToken.lemma,
+        stem: qalsadiToken.stem,
+        posAr: qalsadiToken.pos_ar,
+      },
+      agrees: uniquePos.length <= 1 && uniquePos.length > 0,
     }
   })
 })
 
-function normalizePOS(pos) {
-  if (!pos) return ''
-  const map = {
-    'VERB': 'VERB',
-    'NOUN': 'NOUN',
-    'ADJ': 'ADJECTIVE',
-    'ADJECTIVE': 'ADJECTIVE'
+const metrics = computed(() => {
+  const currentRows = rows.value
+  const comparablePos = currentRows.filter((row) => [row.camel.pos, row.stanza.pos, row.qalsadi.pos].filter(Boolean).length > 1)
+  const posAgree = comparablePos.filter((row) => row.agrees).length
+
+  const comparableLemma = currentRows.filter((row) => [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).length > 1)
+  const lemmaAgree = comparableLemma.filter((row) => {
+    const values = [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).map((x) => String(x).trim())
+    return new Set(values).size <= 1
+  }).length
+
+  return {
+    posAgreement: comparablePos.length ? Math.round((posAgree / comparablePos.length) * 100) : 0,
+    lemmaAgreement: comparableLemma.length ? Math.round((lemmaAgree / comparableLemma.length) * 100) : 0,
+    tokens: currentRows.length,
+    qalsadiTokens: currentRows.filter((row) => row.qalsadi.lemma || row.qalsadi.pos).length,
   }
-  return map[pos] || pos
+})
+
+function normalizePos(pos) {
+  const value = String(pos || '').toUpperCase()
+  if (value === 'ADJECTIVE') return 'ADJ'
+  if (value === 'ADPOSITION') return 'ADP'
+  if (value === 'PRONOUN') return 'PRON'
+  return value
 }
 
-// FIX BUG 1: Format F1 score - pos_f1 is decimal (0.667), multiply by 100
-function formatF1(f1) {
-  if (f1 === undefined || f1 === null) return '—'
-  return (f1 * 100).toFixed(1) + '%'
+function posClass(pos) {
+  const value = normalizePos(pos)
+  if (value === 'VERB') return 'pill pill-blue'
+  if (value === 'NOUN') return 'pill pill-green'
+  if (value === 'ADJ') return 'pill pill-violet'
+  if (value === 'ADP') return 'pill pill-amber'
+  return 'pill pill-gray'
 }
 
-// FIX BUG 1: Format coverage - segmentation_coverage is decimal (1.0), multiply by 100
-function formatCoverage(coverage) {
-  if (coverage === undefined || coverage === null) return '—'
-  return (coverage * 100).toFixed(1) + '%'
+function value(item) {
+  return item || '-'
 }
 
-function posBadge(pos) {
-  const map = {
-    VERB: 'badge badge-blue',
-    NOUN: 'badge badge-green',
-    ADJ: 'badge badge-purple',
-    ADJECTIVE: 'badge badge-purple'
-  }
-  return map[pos] || 'badge badge-gray'
+function clear() {
+  inputText.value = ''
+  results.value = null
+  error.value = ''
+}
+
+function loadSample() {
+  inputText.value = 'قرأ الطلاب الكتب في المكتبة'
 }
 </script>
 
 <style scoped>
-.page-title {
-  font-size: 1.5rem;
-  color: #1F3864;
-  margin-bottom: 20px;
+.compact-hero {
+  padding: 34px 38px;
 }
 
-.input-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #eef2f6 100%);
+.compact-hero .hero-title {
+  font-size: 38px;
 }
 
-.input-label {
-  display: block;
-  font-weight: 600;
-  color: #1F3864;
-  margin-bottom: 8px;
+.input-panel,
+.comparison-results {
+  margin-top: 18px;
 }
 
-.text-input {
-  width: 100%;
-  padding: 14px;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 1.2rem;
-  resize: vertical;
-  outline: none;
-  transition: border 0.2s;
-}
-
-.text-input:focus {
-  border-color: #2E5FA3;
-}
-
-.input-actions {
+.input-head,
+.result-head {
   display: flex;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.btn-clear {
-  padding: 10px 20px;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-  background: white;
-  cursor: pointer;
-  font-weight: 600;
-  color: #5D6D7E;
-  transition: all 0.2s;
-}
-
-.btn-clear:hover {
-  border-color: #5D6D7E;
-}
-
-.tool-title {
-  font-size: 1.1rem;
-  color: #1F3864;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
   margin-bottom: 16px;
 }
 
-.table-wrap {
-  overflow-x: auto;
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
 }
 
-.th-camel {
-  background: #2E5FA3 !important;
+.form-actions {
+  margin-top: 16px;
 }
 
-.th-stanza {
-  background: #1E8449 !important;
-}
-
-.th-farasa {
-  background: #6C3483 !important;
-}
-
-.surface-cell {
-  font-weight: 700;
-  color: #1F3864;
-  min-width: 80px;
-}
-
-.farasa-seg {
-  font-family: 'Traditional Arabic', 'Arial Unicode MS', sans-serif;
-  color: #6C3483;
-  font-weight: 600;
-}
-
-.agree-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.agree-yes {
-  background: #D5F5E3;
-  color: #1E8449;
-}
-
-.agree-no {
-  background: #FADBD8;
-  color: #922B21;
-}
-
-/* Metrics Cards */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
-  margin-top: 24px;
+  margin-bottom: 18px;
 }
 
-.metric-card {
-  text-align: center;
-  padding: 24px 16px;
+.metric {
+  display: grid;
+  gap: 6px;
 }
 
-.metric-pos {
-  border-top: 4px solid #2E5FA3;
+.metric strong {
+  color: var(--navy);
+  font-size: 30px;
+  line-height: 1;
 }
 
-.metric-lemma {
-  border-top: 4px solid #6C3483;
+.metric span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
-.metric-f1 {
-  border-top: 4px solid #1E8449;
+.word-cell {
+  font-size: 18px;
+  font-weight: 900;
 }
 
-.metric-coverage {
-  border-top: 4px solid #F39C12;
+.segments {
+  color: var(--violet);
+  font-weight: 800;
 }
 
-.metric-icon {
-  font-size: 1.8rem;
-  margin-bottom: 8px;
+.detail-row td {
+  background: #fbfdff;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.metric-value {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #1F3864;
-  margin-bottom: 4px;
-}
-
-.metric-label {
-  font-size: 0.85rem;
-  color: #5D6D7E;
-}
-
-.metric-loading {
-  color: #5D6D7E;
-  font-size: 1rem;
-}
-
-@media (max-width: 900px) {
+@media (max-width: 860px) {
   .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
 
-@media (max-width: 500px) {
-  .metrics-grid {
-    grid-template-columns: 1fr;
+  .input-head {
+    flex-direction: column;
   }
 }
 </style>

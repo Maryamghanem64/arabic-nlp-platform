@@ -1,82 +1,191 @@
 <template>
-  <div class="container">
-    <h1 class="page-title">About This Platform</h1>
-
-    <div class="card">
-      <h2>Project Overview</h2>
-      <p>
-        This platform compares many state-of-the-art Arabic NLP tools for morphological analysis,
-        segmentation, and dependency parsing. Built as a graduation project to evaluate and
-        visualize differences in Arabic language processing systems.
+  <div class="page-wrap about-page">
+    <section class="hero-band compact-hero">
+      <span class="eyebrow">Project context</span>
+      <h1 class="hero-title">About the Platform</h1>
+      <p class="hero-copy">
+        A practical comparative environment for Arabic NLP experiments, built with FastAPI,
+        Vue, and multiple Arabic language processing toolkits.
       </p>
-    </div>
+    </section>
 
-    <h2 class="section-title">Tools</h2>
+    <section class="about-grid">
+      <article class="panel panel-pad">
+        <h2 class="section-title">Purpose</h2>
+        <p class="section-subtitle">
+          The platform helps researchers and students compare outputs from different Arabic NLP
+          systems using the same input sentence. It focuses on morphology, segmentation,
+          lemmatization, POS tagging, dependency parsing, and rule-based lexical evidence.
+        </p>
+      </article>
 
-    <div class="card tool-info">
-      <div class="tool-header">
-        <span class="badge badge-blue tool-badge">CAMeL Tools</span>
-        <span class="year">2020–2024  ·  MIT License</span>
-      </div>
-      <p>Comprehensive Arabic NLP toolkit developed by NYU Abu Dhabi. Provides morphological
-      analysis, disambiguation, lemmatization, POS tagging, and diacritization for MSA and
-      multiple Arabic dialects.</p>
-      <div class="metrics">
-        <span class="metric">MSA POS: 98.9%</span>
-        <span class="metric">Lemma: 96.3%</span>
-        <span class="metric">4 Arabic varieties</span>
-      </div>
-    </div>
+      <article class="panel panel-pad">
+        <h2 class="section-title">Runtime Notes</h2>
+        <p class="section-subtitle">
+          Qalsadi is lightweight compared with larger model-based analyzers, so it fits the
+          local FastAPI workflow well. For normal use, start the backend without
+          <code>--reload</code> so NLP resources remain in memory while the server is running.
+        </p>
+      </article>
+    </section>
 
-    <div class="card tool-info">
-      <div class="tool-header">
-        <span class="badge badge-purple tool-badge">Farasa</span>
-        <span class="year">2016  ·  Free (research)</span>
+    <section class="panel panel-pad tools-panel">
+      <div class="section-head">
+        <h2 class="section-title">Integrated Tools</h2>
+        <p class="section-subtitle">Each tool contributes a different kind of linguistic evidence.</p>
       </div>
-      <p>Fast Arabic segmentation and NLP pipeline developed by QCRI. Uses SVM-rank classifier
-      trained on Penn Arabic Treebank. Provides segmentation, POS tagging, lemmatization,
-      NER, and dependency parsing.</p>
-      <div class="metrics">
-        <span class="metric">Segmentation: 98.94%</span>
-        <span class="metric">Word Seg F1: 89%</span>
-      </div>
-    </div>
 
-    <div class="card tool-info">
-      <div class="tool-header">
-        <span class="badge badge-green tool-badge">Stanza</span>
-        <span class="year">2020  ·  Apache 2.0</span>
+      <div class="tool-grid">
+        <article v-for="tool in tools" :key="tool.name" class="tool-card">
+          <span :class="tool.pill">{{ tool.type }}</span>
+          <h3>{{ tool.name }}</h3>
+          <p>{{ tool.description }}</p>
+        </article>
       </div>
-      <p>Stanford NLP neural pipeline supporting 66 languages. Uses BiLSTM and seq2seq models
-      trained on Universal Dependencies treebanks. Provides full UD pipeline including
-      dependency parsing.</p>
-      <div class="metrics">
-        <span class="metric">UPOS: 94.89%</span>
-        <span class="metric">LAS: 79.33%</span>
-        <span class="metric">NER F1: 74.3%</span>
-      </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Reference</h2>
-      <p class="ref">
-        Saadiyeh et al., "A Comparative Study of Arabic Morphological Analyzers,"
-        <em>IAES International Journal of Artificial Intelligence (IJ-AI)</em>.
-      </p>
-    </div>
+    <section class="panel panel-pad">
+      <h2 class="section-title">Feature Matrix</h2>
+      <div class="table-scroll matrix-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>CAMeL</th>
+              <th>Farasa</th>
+              <th>Stanza</th>
+              <th>Qalsadi</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in featureRows" :key="row.feature">
+              <td>{{ row.feature }}</td>
+              <td>{{ mark(row.camel) }}</td>
+              <td>{{ mark(row.farasa) }}</td>
+              <td>{{ mark(row.stanza) }}</td>
+              <td>{{ mark(row.qalsadi) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 </template>
 
+<script setup>
+const tools = [
+  {
+    name: 'CAMeL Tools',
+    type: 'Morphology',
+    pill: 'pill pill-blue',
+    description: 'Arabic morphological disambiguation, root, lemma, POS, gender, number, and tense.',
+  },
+  {
+    name: 'Farasa',
+    type: 'Segmentation',
+    pill: 'pill pill-violet',
+    description: 'Fast token segmentation and clitic splitting for Arabic text.',
+  },
+  {
+    name: 'Stanza',
+    type: 'Syntax',
+    pill: 'pill pill-green',
+    description: 'Universal Dependencies pipeline with POS, lemma, and dependency relations.',
+  },
+  {
+    name: 'Qalsadi',
+    type: 'Rule-based',
+    pill: 'pill pill-amber',
+    description: 'Rule-based Arabic lemmatizer that provides lemmas, stems, unvocalized forms, and Arabic POS tags.',
+  },
+]
+
+const featureRows = [
+  { feature: 'Lemma', camel: true, farasa: false, stanza: true, qalsadi: true },
+  { feature: 'Stem', camel: false, farasa: false, stanza: false, qalsadi: true },
+  { feature: 'Root', camel: true, farasa: false, stanza: false, qalsadi: false },
+  { feature: 'POS', camel: true, farasa: false, stanza: true, qalsadi: true },
+  { feature: 'Gender', camel: true, farasa: false, stanza: true, qalsadi: false },
+  { feature: 'Number', camel: true, farasa: false, stanza: true, qalsadi: false },
+  { feature: 'Segmentation', camel: false, farasa: true, stanza: false, qalsadi: false },
+  { feature: 'Dependency', camel: false, farasa: false, stanza: true, qalsadi: false },
+]
+
+function mark(value) {
+  return value ? 'Yes' : '-'
+}
+</script>
+
 <style scoped>
-.page-title { font-size: 1.5rem; color: #1F3864; margin-bottom: 20px; }
-.section-title { font-size: 1.2rem; color: #1F3864; margin: 24px 0 12px; }
-.card h2 { font-size: 1.1rem; color: #1F3864; margin-bottom: 10px; }
-.card p { color: #5D6D7E; line-height: 1.6; }
-.tool-info { margin-bottom: 16px; }
-.tool-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.tool-badge { font-size: 0.9rem !important; padding: 6px 14px !important; }
-.year { color: #5D6D7E; font-size: 0.85rem; }
-.metrics { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.metric { background: #f8fafc; border: 1px solid #e2e8f0; padding: 4px 10px; border-radius: 6px; font-size: 0.82rem; color: #1F3864; font-weight: 600; }
-.ref { font-size: 0.95rem; }
+.compact-hero {
+  padding: 34px 38px;
+}
+
+.compact-hero .hero-title {
+  font-size: 38px;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: #eef2f7;
+  color: var(--navy);
+  font-weight: 800;
+}
+
+.tools-panel {
+  margin-top: 18px;
+}
+
+.section-head {
+  margin-bottom: 18px;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tool-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.tool-card h3 {
+  margin: 16px 0 8px;
+  font-size: 16px;
+}
+
+.tool-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.matrix-table {
+  margin-top: 18px;
+}
+
+.matrix-table td:not(:first-child),
+.matrix-table th:not(:first-child) {
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .about-grid,
+  .tool-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
