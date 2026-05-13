@@ -20,6 +20,7 @@ import csv
 import io
 import json
 import concurrent.futures
+import threading
 
 
 from camel_tools.morphology.database import MorphologyDB
@@ -99,11 +100,13 @@ try:
 except Exception as e:
     logger.error(f"Stanza failed: {e}")
 
+qalsadi_lem = None
 qalsadi_analyzer = None
+qalsadi_thread_local = threading.local()
 try:
     import qalsadi.lemmatizer as qalsadi_lem
 
-    qalsadi_analyzer = qalsadi_lem.Lemmatizer()
+    qalsadi_analyzer = qalsadi_lem.Lemmatizer
     logger.info("Qalsadi loaded")
 except Exception as e:
     logger.error(f"Qalsadi failed: {e}")
@@ -316,6 +319,18 @@ def classify_conflict(feature: str, val_a: Any, val_b: Any) -> Dict[str, str]:
         "gender": "low",
         "number": "low",
     }
+
+
+def get_qalsadi_analyzer():
+    if not qalsadi_lem:
+        return None
+
+    analyzer = getattr(qalsadi_thread_local, "analyzer", None)
+    if analyzer is None:
+        analyzer = qalsadi_lem.Lemmatizer()
+        qalsadi_thread_local.analyzer = analyzer
+
+    return analyzer
     return {
         "feature": feature,
         "tool_a": str(val_a),
@@ -487,7 +502,9 @@ def qalsadi_analyze(text: str) -> Dict[str, Any]:
     Adds: lemma, POS (Arabic tags), stem, root approximation.
     Approach: Rule-based (complements CAMeL statistical + Stanza neural).
     """
-    if not qalsadi_analyzer:
+    analyzer = get_qalsadi_analyzer()
+
+    if not analyzer:
         return {
             "tool": "qalsadi",
             "status": "failed",
@@ -500,7 +517,7 @@ def qalsadi_analyze(text: str) -> Dict[str, Any]:
         tokens_text = simple_word_tokenize(text)
         tokens = []
         for word in tokens_text:
-            result = qalsadi_analyzer.lemmatize_text(word)
+            result = analyzer.lemmatize_text(word)
 
             if result:
                 lemma_obj = result[0]
