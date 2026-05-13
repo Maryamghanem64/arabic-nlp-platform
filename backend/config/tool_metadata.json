@@ -1,0 +1,31 @@
+{
+  "camel": {
+    "tool_type": "statistical",
+    "strengths": ["fast", "strong lemma/root from morph db", "handles ambiguity"],
+    "weaknesses": ["may be sensitive to tokenization", "limited segmentation"],
+    "supported_tasks": ["pos", "lemma", "root", "segmentation"],
+    "confidence_weight": 0.35
+  },
+  "stanza": {
+    "tool_type": "neural",
+    "strengths": ["strong POS+lemma", "contextual disambiguation", "syntax features"],
+    "weaknesses": ["slower", "token/seg alignment issues"],
+    "supported_tasks": ["pos", "lemma", "segmentation", "syntax"],
+    "confidence_weight": 0.35
+  },
+  "qalsadi": {
+    "tool_type": "rule-based",
+    "strengths": ["lightweight", "explainable", "works without heavy models"],
+    "weaknesses": ["lemma/POS can be inaccurate", "weak POS tagging"],
+    "supported_tasks": ["pos", "lemma"],
+    "confidence_weight": 0.15
+  },
+  "farasa": {
+    "tool_type": "hybrid",
+    "strengths": ["segmentation coverage", "fast segmentation"],
+    "weaknesses": ["no lemma/POS in current pipeline", "segmentation may drift"],
+    "supported_tasks": ["segmentation"],
+    "confidence_weight": 0.15
+  }
+}
+

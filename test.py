@@ -10,9 +10,7 @@
 # pip install qalsadi
 
 from fastapi import FastAPI, HTTPException, Query
-
 from fastapi.middleware.cors import CORSMiddleware
-
 from fastapi.responses import StreamingResponse
 from typing import List, Optional, Dict, Any
 import logging
@@ -72,10 +70,8 @@ app.add_middleware(
 # ============================================================
 # Load Resources
 # ============================================================
-# NOTE: Resources moved to modular backend analyzers; keep only minimal app wiring here.
 
 logger.info("Loading NLP resources...")
-
 
 camel_db = None
 camel_disambiguator = None
@@ -930,76 +926,15 @@ def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi")):
 
 @app.get("/fusion")
 def fusion_endpoint(text: str):
-    """Fusion endpoint.
-
-    Backwards-compatible output:
-    - input
-    - qalsadi
-    - fusion_result (old shape) + fusion_tokens (new structured per-token fusion)
-    """
     if not text.strip():
         raise HTTPException(400, "Empty text")
-
-    # Use new modular fusion pipeline (Qalsadi-aware)
-    # Keep old CAMeL/Farasa/Stanza fusion as fallback/compat.
-    try:
-        import asyncio
-        from backend.analyzers.camel_tool import CamelTool
-        from backend.analyzers.farasa_tool import FarasaTool
-        from backend.analyzers.stanza_tool import StanzaTool
-        from backend.analyzers.qalsadi_tool import QalsadiTool
-        from backend.services.tool_runner import ToolRunner
-        from backend.services.fusion_pipeline import fusion_for_text
-        from backend.config.settings import get_settings
-
-        runner = ToolRunner(timeout_per_tool_s=20.0)
-        tools = [CamelTool(), StanzaTool(), QalsadiTool(), FarasaTool()]
-
-        async def _run():
-            results = await runner.run_all(text, tools=tools)
-            # tool_meta from config
-            settings = get_settings()
-            tool_meta = {
-                k: v.__dict__ for k, v in settings.tool_metadata.items()
-            }
-            return results
-
-        tool_results = asyncio.run(_run())
-
-        # Build structured fusion result
-        structured = fusion_for_text(
-            text=text,
-            runner=runner,
-            tool_results=tool_results,
-            tool_meta={
-                "camel": {"confidence_weight": tool_results.get("camel", {}).get("tool_meta_weight", 0.35)},
-                "stanza": {"confidence_weight": tool_results.get("stanza", {}).get("tool_meta_weight", 0.35)},
-                "qalsadi": {"confidence_weight": tool_results.get("qalsadi", {}).get("tool_meta_weight", 0.15)},
-                "farasa": {"confidence_weight": tool_results.get("farasa", {}).get("tool_meta_weight", 0.15)},
-            },
-        )
-
-        # Also compute old fusion for compatibility
-        camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-        old_fused = fusion_system(text, camel_res, stanza_res, farasa_res)
-
-        return {
-            "input": text,
-            "qalsadi": tool_results.get("qalsadi", qalsadi_res),
-            "fusion_result": old_fused,
-            "fusion_tokens": structured.get("fusion_result", structured),
-            "fusion_meta": structured.get("meta", {}),
-        }
-
-    except Exception:
-        camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-        fused = fusion_system(text, camel_res, stanza_res, farasa_res)
-        return {
-            "input": text,
-            "qalsadi": qalsadi_res,
-            "fusion_result": fused,
-        }
-
+    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
+    fused = fusion_system(text, camel_res, stanza_res, farasa_res)
+    return {
+        "input": text,
+        "qalsadi": qalsadi_res,
+        "fusion_result": fused,
+    }
 
 
 @app.get("/evaluate")
