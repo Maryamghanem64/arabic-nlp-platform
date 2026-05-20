@@ -43,11 +43,11 @@
     <section v-if="results && !loading" class="comparison-results">
       <div class="metrics-grid">
         <article class="panel panel-pad metric">
-          <strong>{{ metrics.posAgreement }}%</strong>
+          <strong>{{ metrics.posAgreement || 0 }}%</strong>
           <span>POS agreement</span>
         </article>
         <article class="panel panel-pad metric">
-          <strong>{{ metrics.lemmaAgreement }}%</strong>
+          <strong>{{ metrics.lemmaAgreement || 0 }}%</strong>
           <span>Lemma agreement</span>
         </article>
         <article class="panel panel-pad metric">
@@ -123,9 +123,9 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import axios from 'axios'
+import { analyzeAll } from '../api/nlpApi'
 
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
@@ -139,17 +139,14 @@ async function compare() {
   results.value = null
 
   try {
-    const { data } = await axios.get(`${API}/analyze-combined`, {
-      params: { text: inputText.value },
-      timeout: 120000,
-    })
-    results.value = data
+    results.value = await analyzeAll(inputText.value)
   } catch {
     error.value = 'Failed to connect to the backend. Start the FastAPI server and try again.'
   } finally {
     loading.value = false
   }
 }
+
 
 const rows = computed(() => {
   const camel = results.value?.camel?.tokens || []
@@ -187,12 +184,18 @@ const rows = computed(() => {
 
 const metrics = computed(() => {
   const currentRows = rows.value
-  const comparablePos = currentRows.filter((row) => [row.camel.pos, row.stanza.pos, row.qalsadi.pos].filter(Boolean).length > 1)
+  const comparablePos = currentRows.filter(
+    (row) => [row.camel.pos, row.stanza.pos, row.qalsadi.pos].filter(Boolean).length > 1,
+  )
   const posAgree = comparablePos.filter((row) => row.agrees).length
 
-  const comparableLemma = currentRows.filter((row) => [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).length > 1)
+  const comparableLemma = currentRows.filter(
+    (row) => [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).length > 1,
+  )
   const lemmaAgree = comparableLemma.filter((row) => {
-    const values = [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).map((x) => String(x).trim())
+    const values = [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma]
+      .filter(Boolean)
+      .map((x) => String(x).trim())
     return new Set(values).size <= 1
   }).length
 
@@ -203,6 +206,7 @@ const metrics = computed(() => {
     qalsadiTokens: currentRows.filter((row) => row.qalsadi.lemma || row.qalsadi.pos).length,
   }
 })
+
 
 function normalizePos(pos) {
   const value = String(pos || '').toUpperCase()
@@ -243,84 +247,5 @@ function loadSample() {
 
 .compact-hero .hero-title {
   font-size: 38px;
-}
-
-.input-panel,
-.comparison-results {
-  margin-top: 18px;
-}
-
-.input-head,
-.result-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 16px;
-}
-
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.form-actions {
-  margin-top: 16px;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.metric {
-  display: grid;
-  gap: 6px;
-}
-
-.metric strong {
-  color: var(--navy);
-  font-size: 30px;
-  line-height: 1;
-}
-
-.metric span {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.word-cell {
-  font-size: 18px;
-  font-weight: 900;
-}
-
-.segments {
-  color: var(--violet);
-  font-weight: 800;
-}
-
-.detail-row td {
-  background: #fbfdff;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-@media (max-width: 860px) {
-  .metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .input-head {
-    flex-direction: column;
-  }
 }
 </style>
