@@ -80,6 +80,7 @@ const toolInfo = [
   { key: 'farasa', name: 'Farasa', description: 'Arabic segmentation and clitic splitting.' },
   { key: 'stanza', name: 'Stanza', description: 'Universal POS, lemma, and dependency parsing.' },
   { key: 'qalsadi', name: 'Qalsadi', description: 'Rule-based Arabic lemmatization and POS evidence.' },
+  { key: 'sinatools', name: 'SinaTools', description: 'Microservice planned (excluded from main app).' },
 ]
 
 const features = [
@@ -97,11 +98,13 @@ const toolCards = computed(() =>
 
 function readableStatus(status) {
   if (status === 'ok') return 'Online'
+  if (status === 'future_work') return 'Future work'
   return 'Offline'
 }
 
 function statusClass(status) {
   if (status === 'ok') return 'dot-online'
+  if (status === 'future_work') return 'dot-offline'
   return 'dot-offline'
 }
 

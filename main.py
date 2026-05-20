@@ -45,6 +45,14 @@ logger = logging.getLogger(__name__)
 def log_time(tool: str, text: str, elapsed: float):
     logger.info(f"[{tool.upper()}] '{text[:30]}' -> {elapsed:.3f}s")
 
+try:
+    from backend.analyzers import PARTNER_TOOLS, get_all_partner_statuses
+    PARTNER_TOOLS_LOADED = True
+    logger.info("✅ Partner tools registry loaded")
+except ImportError as e:
+    PARTNER_TOOLS = {}
+    PARTNER_TOOLS_LOADED = False
+    logger.warning(f"⚠️ Partner tools not found: {e}")
 
 # ============================================================
 # App
@@ -110,7 +118,7 @@ qalsadi_thread_local = threading.local()
 try:
     import qalsadi.lemmatizer as qalsadi_lem
 
-    qalsadi_analyzer = qalsadi_lem.Lemmatizer
+    qalsadi_analyzer = qalsadi_lem.Lemmatizer()
     logger.info("Qalsadi loaded")
 except Exception as e:
     logger.error(f"Qalsadi failed: {e}")
@@ -139,18 +147,22 @@ POS_UNIFIED = {
 }
 
 QALSADI_POS_MAP = {
-    "اسم": "NOUN",
     "فعل": "VERB",
-    "صفة": "ADJECTIVE",
-    "ظرف": "ADVERB",
-    "حرف": "PARTICLE",
-    "ضمير": "PRONOUN",
-    "اسم علم": "NOUN",
+    "اسم": "NOUN",
+    "صفة": "ADJ",
+    "حرف": "PART",
+    "ضمير": "PRON",
+    "ظرف": "ADV",
+
+    # Participles / verbal nouns (map to NOUN as requested)
+    "اسم فاعل": "NOUN",
+    "اسم مفعول": "NOUN",
     "مصدر": "NOUN",
-    "اسم فاعل": "ADJECTIVE",
-    "اسم مفعول": "ADJECTIVE",
-    "صفة مشبهة": "ADJECTIVE",
+
+    # Stopword
+    "STOPWORD": "STOP",
 }
+
 
 WEAK_VERB_ROOTS = {
     "ق.ل": "ق.و.ل", "ب.ع": "ب.ي.ع", "ن.م": "ن.و.م", "ص.م": "ص.و.م",
@@ -323,25 +335,16 @@ def classify_conflict(feature: str, val_a: Any, val_b: Any) -> Dict[str, str]:
         "gender": "low",
         "number": "low",
     }
-
-
-def get_qalsadi_analyzer():
-    if not qalsadi_lem:
-        return None
-
-    analyzer = getattr(qalsadi_thread_local, "analyzer", None)
-    if analyzer is None:
-        analyzer = qalsadi_lem.Lemmatizer()
-        qalsadi_thread_local.analyzer = analyzer
-
-    return analyzer
     return {
-        "feature": feature,
-        "tool_a": str(val_a),
-        "tool_b": str(val_b),
+        "feature":  feature,
+        "tool_a":   str(val_a),
+        "tool_b":   str(val_b),
         "severity": severity_map.get(feature, "low"),
-        "type": f"{feature}_mismatch",
+        "type":     f"{feature}_mismatch",
     }
+
+
+
 
 
 # ============================================================
@@ -501,72 +504,50 @@ def stanza_analyze(text: str) -> Dict[str, Any]:
 
 
 def qalsadi_analyze(text: str) -> Dict[str, Any]:
+    """Qalsadi rule-based Arabic lemmatizer.
+    lemmatize_text(text) returns flat list of strings.
+    Verified: l.lemmatize_text('كتب الطالب') → ['تب', 'طالب']
+    Note: Qalsadi provides lemma only — no POS tagging.
     """
-    Qalsadi morphological analysis - rule-based Arabic lemmatizer.
-    Adds: lemma, POS (Arabic tags), stem, root approximation.
-    Approach: Rule-based (complements CAMeL statistical + Stanza neural).
-    """
-    analyzer = get_qalsadi_analyzer()
-
-    if not analyzer:
+    if not qalsadi_analyzer:
         return {
             "tool": "qalsadi",
             "status": "failed",
             "error": "Qalsadi not loaded",
             "tokens": []
         }
-
     t0 = time.time()
     try:
         tokens_text = simple_word_tokenize(text)
+        lemmas = qalsadi_analyzer.lemmatize_text(text)
         tokens = []
-        for word in tokens_text:
-            result = analyzer.lemmatize_text(word)
-
-            if result:
-                lemma_obj = result[0]
-                if isinstance(lemma_obj, str):
-                    pos_ar = ""
-                    lemma = lemma_obj or word
-                    stem = ""
-                    unvocalized = word
-                else:
-                    pos_ar = getattr(lemma_obj, "type", "") or ""
-                    lemma = getattr(lemma_obj, "lemma", word) or word
-                    stem = getattr(lemma_obj, "stem", "") or ""
-                    unvocalized = getattr(lemma_obj, "unvocalized", word) or word
-            else:
-                pos_ar = ""
-                lemma = word
-                stem = ""
-                unvocalized = word
-
+        for i, word in enumerate(tokens_text):
+            lemma = lemmas[i] if i < len(lemmas) else word
             tokens.append({
                 "surface": word,
-                "lemma": lemma,
-                "stem": stem,
-                "unvocalized": unvocalized,
-                "pos_ar": pos_ar,
-                "pos": QALSADI_POS_MAP.get(pos_ar, pos_ar or "UNKNOWN"),
+                "lemma":   lemma,
+                "pos":     None,
+                "stem":    None,
+                "pos_ar":  None,
             })
-
         log_time("qalsadi", text, time.time() - t0)
         return {
-            "tool": "qalsadi",
-            "status": "ok",
-            "approach": "rule-based",
-            "input": text,
+            "tool":       "qalsadi",
+            "status":     "ok",
+            "approach":   "rule-based lemmatization",
+            "input":      text,
             "word_count": len(tokens),
-            "tokens": tokens
+            "tokens":     tokens
         }
     except Exception as e:
         logger.error(f"[QALSADI] error: {e}")
         return {
-            "tool": "qalsadi",
+            "tool":   "qalsadi",
             "status": "error",
-            "error": str(e),
+            "error":  str(e),
             "tokens": []
         }
+
 
 
 # ============================================================
@@ -750,11 +731,85 @@ def compute_prf(tp: int, fp: int, fn: int) -> Dict[str, float]:
 
 
 def evaluate_tools(text, camel_res, stanza_res, farasa_res):
+    """Evaluate using normalized tokens only (migration-safe).
+
+    If inputs are not normalized yet, fall back to legacy behavior.
+    """
+    # Try normalized flow first
+    try:
+        from backend.services.normalizer import (
+            normalize_tool_output,
+        )
+
+        camel_n = normalize_tool_output("camel", camel_res)
+        stanza_n = normalize_tool_output("stanza", stanza_res)
+        farasa_n = normalize_tool_output("farasa", farasa_res)
+
+        words = [t.get("surface") for t in (farasa_n.get("tokens", []) or [])]
+        total = len(words)
+        camel_tokens = camel_n.get("tokens", [])
+        stanza_tokens = stanza_n.get("tokens", [])
+        farasa_tokens = farasa_n.get("tokens", [])
+
+        pos_tp = pos_fp = pos_fn = 0
+        lemma_match = 0
+        seg_coverage = 0
+        conflicts = []
+        all_conflicts = []
+
+        from backend.services.comparison_service import _lemma_equal, _pos_equal
+
+        for i in range(total):
+            c_tok = camel_tokens[i] if i < len(camel_tokens) else None
+            s_tok = stanza_tokens[i] if i < len(stanza_tokens) else None
+            f_tok = farasa_tokens[i] if i < len(farasa_tokens) else None
+
+            if c_tok and s_tok:
+                if _pos_equal(c_tok.get("pos"), s_tok.get("pos")):
+                    pos_tp += 1
+                else:
+                    pos_fp += 1
+                    pos_fn += 1
+                    if words[i]:
+                        conflicts.append({
+                            "word": words[i],
+                            "camel_pos": c_tok.get("pos"),
+                            "stanza_pos": s_tok.get("pos"),
+                        })
+
+            if c_tok and s_tok:
+                if _lemma_equal(c_tok.get("lemma"), s_tok.get("lemma")):
+                    lemma_match += 1
+
+            if f_tok and f_tok.get("segmentation"):
+                seg_coverage += 1
+
+        pos_agreement = pos_tp / total if total else 0
+        pos_prf = compute_prf(pos_tp, pos_fp, pos_fn)
+
+        return {
+            "total_words": total,
+            "pos_agreement": round(pos_agreement, 2),
+            "pos_agreement_pct": f"{round(pos_agreement * 100, 1)}%",
+            "pos_precision": pos_prf["precision"],
+            "pos_recall": pos_prf["recall"],
+            "pos_f1": pos_prf["f1"],
+            "lemma_match": round(lemma_match / total, 2) if total else 0,
+            "lemma_match_pct": f"{round(lemma_match / total * 100, 1)}%" if total else "0%",
+            "segmentation_coverage": round(seg_coverage / total, 2) if total else 0,
+            "pos_conflicts": conflicts,
+            "all_conflicts": all_conflicts,
+        }
+    except Exception:
+        # Legacy fallback (keeps backward compatibility)
+        pass
+
     words = [t["surface"] for t in farasa_res.get("tokens", [])]
     camel_tokens = camel_res.get("tokens", [])
     stanza_tokens = stanza_res.get("tokens", [])
     farasa_tokens = farasa_res.get("tokens", [])
     total = len(words)
+
 
     pos_tp = pos_fp = pos_fn = 0
     lemma_match = 0
@@ -766,6 +821,7 @@ def evaluate_tools(text, camel_res, stanza_res, farasa_res):
         camel_ana = camel_tokens[i]["analyses"][0] if i < len(camel_tokens) and camel_tokens[i].get("analyses") else None
         stanza_tok = stanza_tokens[i] if i < len(stanza_tokens) else None
         farasa_tok = farasa_tokens[i] if i < len(farasa_tokens) else None
+
 
         if camel_ana and stanza_tok:
             camel_pos = normalize_pos_for_compare(camel_ana.get("pos"))
@@ -819,48 +875,54 @@ def evaluate_tools(text, camel_res, stanza_res, farasa_res):
 
 @app.get("/")
 def root():
+    partner_status = get_all_partner_statuses() if PARTNER_TOOLS_LOADED else {
+        "udpipe":   {"status": "not_loaded"},
+        "alkhalil": {"status": "not_loaded"},
+        "arabert":  {"status": "not_loaded"},
+        "madamira": {"status": "not_loaded"},
+    }
     return {
         "platform": "Arabic NLP Comparative Platform",
-        "version": "8.3",
-        "new_in_v8_3": [
-            "Qalsadi added as lightweight rule-based 4th tool",
-            "fusion and evaluation preserved for camel, farasa, stanza",
-        ],
+        "version":  "8.3",
         "tools": {
-            "camel": {"status": "ok" if camel_disambiguator else "failed"},
-            "farasa": {"status": "ok" if farasa_segmenter else "failed"},
-            "stanza": {"status": "ok" if stanza_pipeline else "failed"},
-            "qalsadi": {"status": "ok" if qalsadi_analyzer else "failed"},
-            # SinaTools -> planned Future Work (large model ~880MB)
+            "camel":     {"status": "ok" if camel_disambiguator else "failed"},
+            "farasa":    {"status": "ok" if farasa_segmenter    else "failed"},
+            "stanza":    {"status": "ok" if stanza_pipeline     else "failed"},
+            "qalsadi":   {"status": "ok" if qalsadi_analyzer    else "failed"},
+            "sinatools": {"status": "future_work",
+                         "note": "Excluded — 880MB model, planned microservice"},
+            **{k: {"status": v["status"]} for k, v in partner_status.items()},
         },
-        "endpoints": [
-            "GET /analyze/camel?text=...",
-            "GET /analyze/farasa?text=...",
-            "GET /analyze/stanza?text=...",
-            "GET /analyze/qalsadi?text=...",
-            "GET /analyze/{tool}?text=...",
-            "GET /analyze-combined?text=...",
-            "GET /compare?text=...&tools=camel,farasa,stanza,qalsadi",
-            "GET /fusion?text=...",
-            "GET /evaluate?text=...",
-            "GET /export?text=...&format=json|csv",
-            "POST /cache/clear",
-        ]
     }
+
 
 
 @app.get("/analyze/camel")
 def analyze_camel(text: str):
+    """Return unified normalized schema for CAMeL."""
     if not text.strip():
         raise HTTPException(400, "Empty text")
-    return cached_analyze(camel_analyze, text)
+    raw = cached_analyze(camel_analyze, text)
+    try:
+        from backend.services.normalizer import normalize_tool_output
+        return normalize_tool_output("camel", raw)
+    except Exception as e:
+        return {"tool": "camel", "status": "error", "input": text, "word_count": 0, "tokens": [], "error": str(e)}
+
 
 
 @app.get("/analyze/farasa")
 def analyze_farasa(text: str):
+    """Return unified normalized schema for Farasa."""
     if not text.strip():
         raise HTTPException(400, "Empty text")
-    return cached_analyze(farasa_analyze, text)
+    raw = cached_analyze(farasa_analyze, text)
+    try:
+        from backend.services.normalizer import normalize_tool_output
+        return normalize_tool_output("farasa", raw)
+    except Exception as e:
+        return {"tool": "farasa", "status": "error", "input": text, "word_count": 0, "tokens": [], "error": str(e)}
+
 
 
 @app.get("/analyze/stanza")
@@ -872,30 +934,31 @@ def analyze_stanza(text: str):
 
 @app.get("/analyze/qalsadi")
 def analyze_qalsadi(text: str):
-    """Qalsadi rule-based morphological analysis."""
-    if not text.strip():
+    # Qalsadi uses analex rule-based checks. Output is structured per token.
+    if not text or not text.strip():
         raise HTTPException(400, "Empty text")
     return cached_analyze(qalsadi_analyze, text)
+
 
 
 @app.get("/analyze/{tool}")
 def analyze_by_tool(tool: str, text: str):
     if not text.strip():
         raise HTTPException(400, "Empty text")
-
     tool = tool.strip().lower()
 
-    if tool == "camel":
-        return cached_analyze(camel_analyze, text)
-    elif tool == "farasa":
-        return cached_analyze(farasa_analyze, text)
-    elif tool == "stanza":
-        return cached_analyze(stanza_analyze, text)
-    elif tool == "qalsadi":
-        return cached_analyze(qalsadi_analyze, text)
-
-    raise HTTPException(404, "Tool not found. Available: camel, farasa, stanza, qalsadi")
-
+    if   tool == "camel":   return cached_analyze(camel_analyze,   text)
+    elif tool == "farasa":  return cached_analyze(farasa_analyze,  text)
+    elif tool == "stanza":  return cached_analyze(stanza_analyze,  text)
+    elif tool == "qalsadi": return cached_analyze(qalsadi_analyze, text)
+    elif tool == "sinatools":
+        return {"tool":"sinatools","status":"future_work",
+                "message":"Planned microservice — excluded due to 880MB model","tokens":[]}
+    elif PARTNER_TOOLS_LOADED and tool in PARTNER_TOOLS:
+        return cached_analyze(PARTNER_TOOLS[tool].analyze, text)
+    else:
+        available = ["camel","farasa","stanza","qalsadi"] + list(PARTNER_TOOLS.keys())
+        raise HTTPException(404, f"Tool '{tool}' not found. Available: {available}")
 
 @app.get("/analyze-combined")
 def analyze_combined(text: str):
@@ -930,75 +993,15 @@ def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi")):
 
 @app.get("/fusion")
 def fusion_endpoint(text: str):
-    """Fusion endpoint.
-
-    Backwards-compatible output:
-    - input
-    - qalsadi
-    - fusion_result (old shape) + fusion_tokens (new structured per-token fusion)
-    """
     if not text.strip():
         raise HTTPException(400, "Empty text")
-
-    # Use new modular fusion pipeline (Qalsadi-aware)
-    # Keep old CAMeL/Farasa/Stanza fusion as fallback/compat.
-    try:
-        import asyncio
-        from backend.analyzers.camel_tool import CamelTool
-        from backend.analyzers.farasa_tool import FarasaTool
-        from backend.analyzers.stanza_tool import StanzaTool
-        from backend.analyzers.qalsadi_tool import QalsadiTool
-        from backend.services.tool_runner import ToolRunner
-        from backend.services.fusion_pipeline import fusion_for_text
-        from backend.config.settings import get_settings
-
-        runner = ToolRunner(timeout_per_tool_s=20.0)
-        tools = [CamelTool(), StanzaTool(), QalsadiTool(), FarasaTool()]
-
-        async def _run():
-            results = await runner.run_all(text, tools=tools)
-            # tool_meta from config
-            settings = get_settings()
-            tool_meta = {
-                k: v.__dict__ for k, v in settings.tool_metadata.items()
-            }
-            return results
-
-        tool_results = asyncio.run(_run())
-
-        # Build structured fusion result
-        structured = fusion_for_text(
-            text=text,
-            runner=runner,
-            tool_results=tool_results,
-            tool_meta={
-                "camel": {"confidence_weight": tool_results.get("camel", {}).get("tool_meta_weight", 0.35)},
-                "stanza": {"confidence_weight": tool_results.get("stanza", {}).get("tool_meta_weight", 0.35)},
-                "qalsadi": {"confidence_weight": tool_results.get("qalsadi", {}).get("tool_meta_weight", 0.15)},
-                "farasa": {"confidence_weight": tool_results.get("farasa", {}).get("tool_meta_weight", 0.15)},
-            },
-        )
-
-        # Also compute old fusion for compatibility
-        camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-        old_fused = fusion_system(text, camel_res, stanza_res, farasa_res)
-
-        return {
-            "input": text,
-            "qalsadi": tool_results.get("qalsadi", qalsadi_res),
-            "fusion_result": old_fused,
-            "fusion_tokens": structured.get("fusion_result", structured),
-            "fusion_meta": structured.get("meta", {}),
-        }
-
-    except Exception:
-        camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-        fused = fusion_system(text, camel_res, stanza_res, farasa_res)
-        return {
-            "input": text,
-            "qalsadi": qalsadi_res,
-            "fusion_result": fused,
-        }
+    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
+    fused = fusion_system(text, camel_res, stanza_res, farasa_res)
+    return {
+        "input":        text,
+        "qalsadi":      qalsadi_res,
+        "fusion_result": fused,
+    }
 
 
 
@@ -1012,6 +1015,104 @@ def evaluate(text: str):
         "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res)
     }
 
+
+GOLD_DATASET = [
+    {"text": "كتب الطالب الدرس",
+     "gold": [
+         {"word":"كتب",    "pos":"VERB","lemma":"كتب"},
+         {"word":"الطالب", "pos":"NOUN","lemma":"طالب"},
+         {"word":"الدرس",  "pos":"NOUN","lemma":"درس"},
+     ]},
+    {"text": "ذهب محمد إلى المدرسة",
+     "gold": [
+         {"word":"ذهب",    "pos":"VERB","lemma":"ذهب"},
+         {"word":"محمد",   "pos":"NOUN","lemma":"محمد"},
+         {"word":"إلى",    "pos":"ADP", "lemma":"إلى"},
+         {"word":"المدرسة","pos":"NOUN","lemma":"مدرسة"},
+     ]},
+    {"text": "قرأ الطلاب الكتب في المكتبة",
+     "gold": [
+         {"word":"قرأ",     "pos":"VERB","lemma":"قرأ"},
+         {"word":"الطلاب",  "pos":"NOUN","lemma":"طالب"},
+         {"word":"الكتب",   "pos":"NOUN","lemma":"كتاب"},
+         {"word":"في",      "pos":"ADP", "lemma":"في"},
+         {"word":"المكتبة", "pos":"NOUN","lemma":"مكتبة"},
+     ]},
+    {"text": "سيعمل العمال بكفاءة",
+     "gold": [
+         {"word":"سيعمل", "pos":"VERB","lemma":"عمل"},
+         {"word":"العمال","pos":"NOUN","lemma":"عامل"},
+         {"word":"بكفاءة","pos":"NOUN","lemma":"كفاءة"},
+     ]},
+    {"text": "العين جميلة",
+     "gold": [
+         {"word":"العين", "pos":"NOUN","lemma":"عين"},
+         {"word":"جميلة", "pos":"ADJ", "lemma":"جميل"},
+     ]},
+    {"text": "لم يذهب محمد إلى المدرسة أمس",
+     "gold": [
+         {"word":"لم",      "pos":"PART","lemma":"لم"},
+         {"word":"يذهب",    "pos":"VERB","lemma":"ذهب"},
+         {"word":"محمد",    "pos":"NOUN","lemma":"محمد"},
+         {"word":"إلى",     "pos":"ADP", "lemma":"إلى"},
+         {"word":"المدرسة", "pos":"NOUN","lemma":"مدرسة"},
+         {"word":"أمس",     "pos":"ADV", "lemma":"أمس"},
+     ]},
+    {"text": "باع التاجر بضاعته بسعر مرتفع",
+     "gold": [
+         {"word":"باع",    "pos":"VERB","lemma":"باع"},
+         {"word":"التاجر", "pos":"NOUN","lemma":"تاجر"},
+         {"word":"بضاعته","pos":"NOUN","lemma":"بضاعة"},
+         {"word":"بسعر",   "pos":"NOUN","lemma":"سعر"},
+         {"word":"مرتفع",  "pos":"ADJ", "lemma":"مرتفع"},
+     ]},
+    {"text": "إن البنات يأكلن المثلجات",
+     "gold": [
+         {"word":"إن",       "pos":"PART","lemma":"إن"},
+         {"word":"البنات",   "pos":"NOUN","lemma":"بنت"},
+         {"word":"يأكلن",    "pos":"VERB","lemma":"أكل"},
+         {"word":"المثلجات", "pos":"NOUN","lemma":"مثلجة"},
+     ]},
+    {"text": "الكتاب الذي قرأته مفيد جداً",
+     "gold": [
+         {"word":"الكتاب","pos":"NOUN","lemma":"كتاب"},
+         {"word":"الذي",  "pos":"PRON","lemma":"الذي"},
+         {"word":"قرأته", "pos":"VERB","lemma":"قرأ"},
+         {"word":"مفيد",  "pos":"ADJ", "lemma":"مفيد"},
+         {"word":"جداً",  "pos":"ADV", "lemma":"جداً"},
+     ]},
+    {"text": "وجدت المعلمة طالبة مجتهدة في الفصل",
+     "gold": [
+         {"word":"وجدت",    "pos":"VERB","lemma":"وجد"},
+         {"word":"المعلمة", "pos":"NOUN","lemma":"معلمة"},
+         {"word":"طالبة",   "pos":"NOUN","lemma":"طالب"},
+         {"word":"مجتهدة",  "pos":"ADJ", "lemma":"مجتهد"},
+         {"word":"في",      "pos":"ADP", "lemma":"في"},
+         {"word":"الفصل",   "pos":"NOUN","lemma":"فصل"},
+     ]},
+]
+
+@app.get("/evaluate/dataset")
+def evaluate_dataset():
+    """Evaluate tools against gold dataset — 10 sentences"""
+    results = []
+    for item in GOLD_DATASET:
+        camel_res, farasa_res, stanza_res, _ = run_all_tools(item["text"])
+        eval_result = evaluate_tools(item["text"], camel_res, stanza_res, farasa_res)
+        results.append({
+            "text":              item["text"],
+            "pos_agreement_pct": eval_result["pos_agreement_pct"],
+            "lemma_match_pct":   eval_result["lemma_match_pct"],
+            "pos_f1":            eval_result["pos_f1"],
+            "total_words":       eval_result["total_words"],
+        })
+    avg_f1 = sum(r["pos_f1"] for r in results) / len(results)
+    return {
+        "total_sentences": len(results),
+        "average_f1":      round(avg_f1, 3),
+        "average_f1_pct":  f"{round(avg_f1 * 100, 1)}%",
+        "results":         results,
+    }
 
 @app.get("/export")
 def export_results(text: str, format: str = Query("json", description="json or csv")):
@@ -1075,6 +1176,294 @@ def export_results(text: str, format: str = Query("json", description="json or c
 def cache_clear():
     clear_cache()
     return {"status": "cache cleared"}
+
+
+# ============================================================
+# UI-ready Endpoints (optimized payloads)
+# ============================================================
+
+
+def _tool_names_from_query(tools: str) -> List[str]:
+    return [t.strip().lower() for t in tools.split(",") if t.strip()]
+
+
+def _normalize_for_ui(tool_name: str, raw: Dict[str, Any]) -> Dict[str, Any]:
+    # Use backend normalizer when possible; fallback to empty on failure.
+    try:
+        from backend.services.normalizer import normalize_tool_output
+
+        return normalize_tool_output(tool_name, raw)
+    except Exception:
+        return {"tool": tool_name, "status": "error", "input": None, "word_count": 0, "tokens": []}
+
+
+def _ui_token_from_aligned(*, base_token: Dict[str, Any], tool_token: Optional[Dict[str, Any]], tool_name: str) -> Dict[str, Any]:
+    if tool_name == "farasa":
+        seg = tool_token.get("segmentation") if tool_token else None
+        return {"segments": seg if isinstance(seg, list) and seg else [base_token.get("surface")]}
+
+    lemma = tool_token.get("lemma") if tool_token else None
+    root = tool_token.get("root") if tool_token else None
+    pos = tool_token.get("pos") if tool_token else None
+
+    from backend.services.ui_contracts import placeholder, safe_pos, pos_badge
+
+    pos_std = safe_pos(pos)
+
+    return {
+        "lemma": placeholder(lemma),
+        "root": placeholder(root),
+        "pos": pos_std,
+        "badge": pos_badge(pos_std),
+    }
+
+
+def _agreement_for_row(*, aligned_row: Any) -> Dict[str, Any]:
+    # aligned_row is backend.services.alignment_engine.AlignedToken-like
+    tools = aligned_row.tools
+
+    from backend.services.ui_contracts import compute_status_color
+
+    camel = tools.get("camel")
+    stanza = tools.get("stanza")
+    qalsadi = tools.get("qalsadi")
+    # reference: prefer camel, else stanza, else qalsadi
+    ref = camel or stanza or qalsadi
+
+    def eq(a: Any, b: Any) -> bool:
+        if a is None or b is None:
+            return False
+        import re
+
+        def stripd(x: Any) -> str:
+            return re.sub(r"[\u064B-\u065F\u0670]", "", str(x)).strip()
+
+        sa = stripd(a)
+        sb = stripd(b)
+        return sa != "" and sa == sb
+
+    pos_ok = True
+    lemma_ok = True
+    root_ok = True
+
+    # POS across non-empty tools
+    pos_vals = [t.get("pos") for t in [camel, stanza, qalsadi] if t and t.get("pos")]
+    if len(pos_vals) >= 2:
+        pos_ok = all(v == pos_vals[0] for v in pos_vals)
+
+    lemma_vals = [t.get("lemma") for t in [camel, stanza, qalsadi] if t and t.get("lemma")]
+    if len(lemma_vals) >= 2:
+        lemma_ok = all(eq(v, lemma_vals[0]) for v in lemma_vals)
+
+    root_vals = [t.get("root") for t in [camel, stanza, qalsadi] if t and t.get("root")]
+    if len(root_vals) >= 2:
+        root_ok = all(eq(v, root_vals[0]) for v in root_vals)
+
+    status, color = ("none", "red")
+    if pos_ok and lemma_ok and root_ok:
+        status, color = "full", "green"
+    elif pos_ok or lemma_ok or root_ok:
+        status, color = "partial", "yellow"
+
+    return {
+        "pos": pos_ok,
+        "lemma": lemma_ok,
+        "root": root_ok,
+        "status": status,
+        "status_color": color,
+        "agreement_state": status,
+    }
+
+
+@app.get("/ui/analyze/{tool}")
+def ui_analyze(tool: str, text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+
+    tool_l = tool.strip().lower()
+    if tool_l not in {"camel", "farasa", "stanza", "qalsadi"}:
+        raise HTTPException(404, "Tool not supported for ui/analyze")
+
+    # raw analyze
+    raw = cached_analyze(
+        {"camel": camel_analyze, "farasa": farasa_analyze, "stanza": stanza_analyze, "qalsadi": qalsadi_analyze}[tool_l],
+        text,
+    )
+
+    normalized = _normalize_for_ui(tool_l, raw)
+    tokens = normalized.get("tokens", []) or []
+
+    # UI rows: flat list (no nested analyses)
+    from backend.services.ui_contracts import placeholder, safe_pos
+
+    rows = []
+    for t in tokens:
+        if tool_l == "farasa":
+            seg = t.get("segmentation")
+            segs = seg if isinstance(seg, list) and seg else [t.get("surface")]
+            rows.append({"word": t.get("surface"), "segments": segs})
+        else:
+            rows.append(
+                {
+                    "word": t.get("surface"),
+                    "lemma": placeholder(t.get("lemma")),
+                    "root": placeholder(t.get("root")),
+                    "pos": safe_pos(t.get("pos")),
+                }
+            )
+
+    return {"tool": tool_l, "rows": rows}
+
+
+@app.get("/ui/compare")
+def ui_compare(
+    text: str,
+    tools: str = Query("camel,stanza,qalsadi,farasa"),
+):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+
+    tool_list = _tool_names_from_query(tools)
+
+    # Run selected tools (raw), then normalize
+    raw_results: Dict[str, Dict[str, Any]] = {}
+
+    if "camel" in tool_list:
+        raw_results["camel"] = cached_analyze(camel_analyze, text)
+    if "farasa" in tool_list:
+        raw_results["farasa"] = cached_analyze(farasa_analyze, text)
+    if "stanza" in tool_list:
+        raw_results["stanza"] = cached_analyze(stanza_analyze, text)
+    if "qalsadi" in tool_list:
+        raw_results["qalsadi"] = cached_analyze(qalsadi_analyze, text)
+
+    norm = {t: _normalize_for_ui(t, raw_results[t]) for t in raw_results.keys()}
+
+    # Canonical base: prefer farasa tokens if present, else camel/stanza/qalsadi first available
+    base_tool = "farasa" if "farasa" in norm else ("camel" if "camel" in norm else "stanza" if "stanza" in norm else "qalsadi")
+    base_tokens = norm.get(base_tool, {}).get("tokens", []) or []
+
+    # Tools tokens for alignment (only those present)
+    tools_tokens = {t: norm[t].get("tokens", []) or [] for t in norm.keys()}
+
+    from backend.services.alignment_engine import align_tools, compute_agreements
+
+    aligned, _meta = align_tools(base_tokens=base_tokens, tools_tokens=tools_tokens)
+    agreements = compute_agreements(aligned_tokens=aligned)
+
+    # Build rows
+    rows = []
+    for at in aligned:
+        word = at.base.get("surface")
+
+        row = {
+            "word": word,
+            "camel": None,
+            "stanza": None,
+            "qalsadi": None,
+            "farasa": None,
+            "agreement": None,
+        }
+
+        if "camel" in norm:
+            row["camel"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("camel"), tool_name="camel")
+        if "stanza" in norm:
+            row["stanza"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("stanza"), tool_name="stanza")
+        if "qalsadi" in norm:
+            row["qalsadi"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("qalsadi"), tool_name="qalsadi")
+        if "farasa" in norm:
+            row["farasa"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("farasa"), tool_name="farasa")
+
+        row["agreement"] = _agreement_for_row(aligned_row=at)
+        rows.append(row)
+
+    return {
+        "summary": {
+            "pos_agreement": agreements.get("pos_agreement", 0),
+            "lemma_agreement": agreements.get("lemma_agreement", 0),
+            "root_agreement": agreements.get("root_agreement", 0),
+            "token_count": agreements.get("token_count", len(rows)),
+        },
+        "rows": rows,
+    }
+
+
+@app.get("/ui/fusion")
+def ui_fusion(text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+
+    # Use raw tools, normalize, align by surface
+    camel_raw = cached_analyze(camel_analyze, text)
+    stanza_raw = cached_analyze(stanza_analyze, text)
+    qalsadi_raw = cached_analyze(qalsadi_analyze, text)
+    farasa_raw = cached_analyze(farasa_analyze, text)
+
+    from backend.services.normalizer import normalize_tool_output
+
+    camel_n = _normalize_for_ui("camel", camel_raw)
+    stanza_n = _normalize_for_ui("stanza", stanza_raw)
+    qalsadi_n = _normalize_for_ui("qalsadi", qalsadi_raw)
+    farasa_n = _normalize_for_ui("farasa", farasa_raw)
+
+    base_tokens = farasa_n.get("tokens", []) or []
+    tools_tokens = {
+        "camel": camel_n.get("tokens", []) or [],
+        "stanza": stanza_n.get("tokens", []) or [],
+        "qalsadi": qalsadi_n.get("tokens", []) or [],
+        "farasa": farasa_n.get("tokens", []) or [],
+    }
+
+    from backend.services.alignment_engine import align_tools
+
+    aligned, _ = align_tools(base_tokens=base_tokens, tools_tokens=tools_tokens)
+
+    # UI fusion: pick from camel when present else stanza else qalsadi.
+    rows = []
+    for at in aligned:
+        camel = at.tools.get("camel")
+        stanza = at.tools.get("stanza")
+        qalsadi = at.tools.get("qalsadi")
+
+        # Simple agreement-based choice for pos/lemma/root
+        agreement = _agreement_for_row(aligned_row=at)
+
+        def pick(feature: str):
+            for t, src in [(camel, "camel"), (stanza, "stanza"), (qalsadi, "qalsadi")]:
+                if t and t.get(feature):
+                    return t.get(feature), src
+            return None, "-"
+
+        lemma, lemma_src = pick("lemma")
+        root, root_src = pick("root")
+        pos, pos_src = pick("pos")
+
+        from backend.services.ui_contracts import placeholder, safe_pos
+
+        # Confidence: average of available normalized confidences (camel & stanza)
+        confs = []
+        for t in [camel, stanza, qalsadi]:
+            if t and isinstance(t.get("confidence"), dict):
+                confs.append(float(t["confidence"].get("score") or 0.0))
+        confidence = round(sum(confs) / len(confs), 2) if confs else 0.0
+
+        rows.append(
+            {
+                "word": at.base.get("surface"),
+                "lemma": placeholder(lemma),
+                "root": placeholder(root),
+                "pos": safe_pos(pos),
+                "gloss": placeholder(camel.get("gloss") if camel else None, default="-"),
+                "confidence": confidence,
+                "source": {
+                    "lemma": lemma_src if lemma_src else "camel",
+                    "root": root_src if root_src else "camel",
+                    "pos": "agreement" if agreement.get("status") in ("full", "partial") else (pos_src if pos_src else "camel"),
+                },
+            }
+        )
+
+    return {"rows": rows}
 
 
 if __name__ == "__main__":
