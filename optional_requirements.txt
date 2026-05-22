@@ -1,0 +1,9 @@
+# Optional partner/research tools. Install only when the teammate needs these integrations.
+transformers>=4.40
+torch>=2.2
+ufal.udpipe>=1.3
+
+# AlKhalil and MADAMIRA are Java/file based and usually require local licensed JAR/model files.
+# Configure paths with:
+#   ALKHALIL_JAR=C:\path\to\alkhalil.jar
+#   MADAMIRA_HOME=C:\path\to\MADAMIRA

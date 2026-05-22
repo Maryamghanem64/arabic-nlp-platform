@@ -6,6 +6,7 @@ from app.api.analyze import router as analyze_router
 from app.api.fusion import router as fusion_router
 from app.api.evaluate import router as evaluate_router
 from app.api.ui import router as ui_router
+from app.core.tool_registry import log_startup_report
 
 app = FastAPI(title="Arabic NLP Comparative Platform", version="8.3")
 
@@ -21,6 +22,11 @@ app.include_router(analyze_router)
 app.include_router(fusion_router)
 app.include_router(evaluate_router)
 app.include_router(ui_router)
+
+
+@app.on_event("startup")
+def validate_tools_on_startup():
+    log_startup_report()
 
 if __name__ == "__main__":
     import uvicorn

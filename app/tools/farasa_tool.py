@@ -3,23 +3,49 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List
 
-from farasa.segmenter import FarasaSegmenter
-from camel_tools.tokenizers.word import simple_word_tokenize
-
+from app.core.tool_registry import unavailable_result
 from app.tools.base_tool import BaseTool
 from app.utils.logger import logger, log_time
 
 
+FarasaSegmenter = None
+simple_word_tokenize = None
 farasa_segmenter = None
+farasa_import_error = None
+
+
+def _fallback_tokenize(text: str) -> List[str]:
+    return [part for part in str(text or "").split() if part]
+
+
+def _ensure_imports() -> bool:
+    global FarasaSegmenter, simple_word_tokenize, farasa_import_error
+    if FarasaSegmenter and simple_word_tokenize:
+        return True
+    try:
+        from camel_tools.tokenizers.word import simple_word_tokenize as _simple_word_tokenize
+        from farasa.segmenter import FarasaSegmenter as _FarasaSegmenter
+
+        FarasaSegmenter = _FarasaSegmenter
+        simple_word_tokenize = _simple_word_tokenize
+        farasa_import_error = None
+        return True
+    except Exception as exc:
+        farasa_import_error = str(exc)
+        return False
 
 
 def load_farasa() -> None:
     global farasa_segmenter
+    if not _ensure_imports():
+        logger.warning("Farasa unavailable: %s", farasa_import_error)
+        farasa_segmenter = None
+        return
     try:
         farasa_segmenter = FarasaSegmenter(interactive=False)
-        logger.info("✅ Farasa loaded")
-    except Exception as e:
-        logger.error(f"❌ Farasa failed: {e}")
+        logger.info("Farasa loaded")
+    except Exception as exc:
+        logger.warning("Farasa failed: %s", exc)
         farasa_segmenter = None
 
 
@@ -29,12 +55,12 @@ def farasa_analyze(text: str) -> Dict[str, Any]:
         load_farasa()
 
     if not farasa_segmenter:
-        return {"tool": "farasa", "status": "failed", "error": "Farasa not loaded", "tokens": []}
+        return unavailable_result("farasa", farasa_import_error or "Farasa package, Java, or JAR files are not available.", text)
 
     t0 = time.time()
     try:
         segmented = farasa_segmenter.segment(text)
-        raw_tokens = simple_word_tokenize(text)
+        raw_tokens = simple_word_tokenize(text) if simple_word_tokenize else _fallback_tokenize(text)
         raw_segs = segmented.split()
 
         token_outputs: List[Dict[str, Any]] = []
@@ -52,9 +78,9 @@ def farasa_analyze(text: str) -> Dict[str, Any]:
             "segmented_text": segmented,
             "tokens": token_outputs,
         }
-    except Exception as e:
-        logger.error(f"[FARASA] error: {e}")
-        return {"tool": "farasa", "status": "error", "error": str(e), "tokens": []}
+    except Exception as exc:
+        logger.warning("[FARASA] error: %s", exc)
+        return {"tool": "farasa", "status": "error", "reason": str(exc), "input": text, "word_count": 0, "tokens": []}
 
 
 class FarasaTool(BaseTool):
@@ -65,4 +91,3 @@ class FarasaTool(BaseTool):
 
     def analyze(self, text: str) -> Dict[str, Any]:
         return farasa_analyze(text)
-

@@ -28,6 +28,8 @@ def sinatools_analyze(text: str) -> Dict[str, Any]:
         "message": "SinaTools planned for future microservice deployment",
         "reason": "Large model size (~880MB) excluded from current implementation",
         "tokens": [],
+        "input": text,
+        "word_count": 0,
     }
 
 
