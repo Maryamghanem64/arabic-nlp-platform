@@ -136,7 +136,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { analyzeAll, fusionText } from '../api/nlpApi'
 
 const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 const route = useRoute()
@@ -173,11 +173,7 @@ async function analyze() {
   fusionRows.value = []
 
   try {
-    const { data } = await axios.get(`${API}/analyze-combined`, {
-      params: { text: inputText.value },
-      timeout: 120000,
-    })
-    results.value = data
+    results.value = await analyzeAll(inputText.value)
     await loadFusion()
   } catch {
     error.value = 'Failed to connect to the backend. Make sure uvicorn is running on port 8000.'
@@ -189,10 +185,7 @@ async function analyze() {
 async function loadFusion() {
   if (!inputText.value.trim()) return
   try {
-    const { data } = await axios.get(`${API}/fusion`, {
-      params: { text: inputText.value },
-      timeout: 120000,
-    })
+    const data = await fusionText(inputText.value)
     fusionRows.value = data.fusion_result?.fusion || []
   } catch {
     fusionRows.value = []

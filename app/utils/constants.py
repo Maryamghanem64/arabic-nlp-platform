@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict
 
-# --- POS + unified tags ---
+
 POS_MAP = {
     "noun": "NOUN",
     "verb": "VERB",
@@ -18,20 +18,25 @@ POS_MAP = {
 POS_UNIFIED = {
     "NOUN": "NOUN",
     "VERB": "VERB",
+    "ADJ": "ADJ",
     "ADJECTIVE": "ADJ",
+    "ADP": "ADP",
     "ADPOSITION": "ADP",
-    "PRONOUN": "PRON",
+    "ADV": "ADV",
     "ADVERB": "ADV",
+    "PRON": "PRON",
+    "PRONOUN": "PRON",
+    "CCONJ": "CCONJ",
     "CONJUNCTION": "CCONJ",
+    "PART": "PART",
     "PARTICLE": "PART",
+    "PUNCT": "PUNCT",
     "PUNCTUATION": "PUNCT",
     "CONJ_SUB": "SCONJ",
 }
 
-# --- Future reference ---
 SINATOOLS_POS_MAP = {}
 
-# --- Qalsadi POS labels kept for future ---
 QALSADI_POS_MAP = {
     "فعل": "VERB",
     "اسم": "NOUN",
@@ -39,15 +44,12 @@ QALSADI_POS_MAP = {
     "حرف": "PART",
     "ضمير": "PRON",
     "ظرف": "ADV",
-
     "اسم فاعل": "NOUN",
     "اسم مفعول": "NOUN",
     "مصدر": "NOUN",
-
     "STOPWORD": "STOP",
 }
 
-# --- Fusion / weighting ---
 FUSION_WEIGHTS = {
     "lemma": {"camel": 3, "stanza": 1},
     "pos": {"camel": 2, "stanza": 2},
@@ -56,12 +58,10 @@ FUSION_WEIGHTS = {
     "syntax": {"stanza": 3},
 }
 
-# --- Morphology maps ---
 ASPECT_MAP = {"p": "past", "i": "present", "c": "imperative", "na": None}
 GENDER_MAP = {"m": "masculine", "f": "feminine", "na": None}
 NUMBER_MAP = {"s": "singular", "d": "dual", "p": "plural", "na": None}
 
-# --- Root helpers ---
 WEAK_VERB_ROOTS = {
     "ق.ل": "ق.و.ل",
     "ب.ع": "ب.ي.ع",
@@ -130,10 +130,7 @@ GLOSS_NOISE = {
     "fem",
 }
 
-KNOWN_FIXES: Dict[str, Dict[str, Any]] = {
-    # keep map for future fixes
-}
-
+KNOWN_FIXES: Dict[str, Dict[str, Any]] = {}
 
 GOLD_DATASET = [
     {
@@ -209,13 +206,13 @@ GOLD_DATASET = [
         ],
     },
     {
-        "text": "الكتاب الذي قرأته مفيد جداً",
+        "text": "الكتاب الذي قرأته مفيد جدا",
         "gold": [
             {"word": "الكتاب", "pos": "NOUN", "lemma": "كتاب"},
             {"word": "الذي", "pos": "PRON", "lemma": "الذي"},
             {"word": "قرأته", "pos": "VERB", "lemma": "قرأ"},
             {"word": "مفيد", "pos": "ADJ", "lemma": "مفيد"},
-            {"word": "جداً", "pos": "ADV", "lemma": "جداً"},
+            {"word": "جدا", "pos": "ADV", "lemma": "جدا"},
         ],
     },
     {
@@ -230,4 +227,3 @@ GOLD_DATASET = [
         ],
     },
 ]
-

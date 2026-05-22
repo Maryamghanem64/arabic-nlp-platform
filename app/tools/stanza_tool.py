@@ -3,7 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-import stanza
+try:
+    import stanza
+except Exception:  # pragma: no cover - keeps API importable without stanza installed
+    stanza = None
 
 from app.tools.base_tool import BaseTool
 from app.utils.helpers import parse_feats
@@ -16,6 +19,8 @@ stanza_pipeline = None
 def load_stanza() -> None:
     global stanza_pipeline
     try:
+        if stanza is None:
+            raise RuntimeError("stanza is not installed")
         stanza_pipeline = stanza.Pipeline(
             "ar",
             processors="tokenize,mwt,pos,lemma,depparse",
@@ -28,6 +33,10 @@ def load_stanza() -> None:
 
 
 def stanza_analyze(text: str) -> Dict[str, Any]:
+    global stanza_pipeline
+    if not stanza_pipeline:
+        load_stanza()
+
     if not stanza_pipeline:
         return {"tool": "stanza", "status": "failed", "error": "Stanza not loaded", "tokens": []}
 

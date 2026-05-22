@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import time
 import threading
+import time
 from typing import Any, Dict, List
 
 from camel_tools.tokenizers.word import simple_word_tokenize
@@ -14,17 +14,15 @@ qalsadi_analyzer = None
 qalsadi_thread_local = threading.local()
 
 
-
 def load_qalsadi() -> None:
     global qalsadi_analyzer
     try:
         import qalsadi.lemmatizer as qalsadi_lem
 
-        # INSTANCE not module
         qalsadi_analyzer = qalsadi_lem.Lemmatizer()
-        logger.info("✅ Qalsadi loaded")
+        logger.info("Qalsadi loaded")
     except Exception as e:
-        logger.error(f"❌ Qalsadi failed: {e}")
+        logger.error(f"Qalsadi failed: {e}")
         qalsadi_analyzer = None
 
 
@@ -40,7 +38,6 @@ def _normalize_arabic(t: str) -> str:
 def qalsadi_analyze(text: str) -> Dict[str, Any]:
     global qalsadi_analyzer
 
-    # Lazy-load so the analyzer instance is guaranteed to exist in this module.
     if qalsadi_analyzer is None:
         load_qalsadi()
 
@@ -59,19 +56,19 @@ def qalsadi_analyze(text: str) -> Dict[str, Any]:
             }
 
         tokens_text = simple_word_tokenize(normalized)
-
-        # IMPORTANT VERIFIED: lemmatize_text returns flat list[str]
         lemmas = qalsadi_analyzer.lemmatize_text(normalized)
 
         tokens: List[Dict[str, Any]] = []
         for i, word in enumerate(tokens_text):
             lemma = lemmas[i] if i < len(lemmas) else word
-            tokens.append({
-                "surface": word,
-                "lemma": lemma,
-                "pos": None,
-                "stem": None,
-            })
+            tokens.append(
+                {
+                    "surface": word,
+                    "lemma": lemma,
+                    "pos": None,
+                    "stem": None,
+                }
+            )
 
         log_time("qalsadi", text, time.time() - t0)
         return {
@@ -95,4 +92,3 @@ class QalsadiTool(BaseTool):
 
     def analyze(self, text: str) -> Dict[str, Any]:
         return qalsadi_analyze(text)
-

@@ -51,6 +51,10 @@ def load_camel() -> None:
 
 
 def camel_analyze(text: str) -> Dict[str, Any]:
+    global camel_db, camel_disambiguator
+    if not camel_disambiguator or not camel_db:
+        load_camel()
+
     if not camel_disambiguator or not camel_db:
         return {"tool": "camel", "status": "failed", "error": "CAMeL not loaded", "tokens": []}
 

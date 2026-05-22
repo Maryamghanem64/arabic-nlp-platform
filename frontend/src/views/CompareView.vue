@@ -1,16 +1,15 @@
-<!-- Version: 8.3 -->
+<!-- Version: 8.3.1 -->
 <template>
   <div class="page-wrap compare-page">
     <section class="hero-band compact-hero">
       <span class="eyebrow">Comparison view</span>
       <h1 class="hero-title">Compare Tool Decisions</h1>
       <p class="hero-copy">
-        Review token-level differences between CAMeL, Stanza, Farasa, and Qalsadi without
-        requiring a separate evaluation endpoint.
+        Review token-level POS differences from CAMeL and Stanza, Farasa segmentation,
+        and Qalsadi lemmas using the backend evaluation endpoint for metrics.
       </p>
     </section>
 
-    <!-- Input -->
     <section class="panel panel-pad input-panel">
       <div class="input-head">
         <div>
@@ -20,7 +19,7 @@
 
         <label class="toggle">
           <input type="checkbox" v-model="showDetails" />
-          <span>Show lemmas and stems</span>
+          <span>Show lemmas and roots</span>
         </label>
       </div>
 
@@ -47,29 +46,26 @@
     <div v-if="loading" class="loading-state">Comparing token outputs...</div>
     <div v-if="error" class="error-state">{{ error }}</div>
 
-    <!-- Results -->
     <section v-if="results && !loading" class="comparison-results">
       <div class="metrics-grid">
-        <article class="panel panel-pad metric" :class="metricColor(metrics.posAgreement)">
-          <div class="metric-icon">🎯</div>
-          <strong>{{ metrics.posAgreement }}%</strong>
-          <span>POS Agreement</span>
+        <article class="panel panel-pad metric" :class="metricColor(metrics.posAgreementValue)">
+          <strong>{{ metrics.posAgreement }}</strong>
+          <span>POS agreement</span>
         </article>
         <article class="panel panel-pad metric">
-<strong>{{ metrics.lemmaAgreement || '0%' }}</strong>
-          <span>Lemma agreement</span>
+          <strong>{{ metrics.lemmaAgreement }}</strong>
+          <span>Lemma match</span>
         </article>
         <article class="panel panel-pad metric">
-          <strong>{{ metrics.tokens }}</strong>
-          <span>Compared tokens</span>
+          <strong>{{ metrics.posF1 }}</strong>
+          <span>POS F1</span>
         </article>
         <article class="panel panel-pad metric">
-          <strong>{{ metrics.qalsadiTokens }}</strong>
-          <span>Qalsadi tokens</span>
+          <strong>{{ metrics.segmentationCoverage }}</strong>
+          <span>Segmentation coverage</span>
         </article>
       </div>
 
-      <!-- Comparison Table -->
       <article class="panel panel-pad">
         <div class="result-head">
           <div>
@@ -83,10 +79,10 @@
             <thead>
               <tr>
                 <th>Word</th>
-                <th class="th-camel">CAMeL POS</th>
-                <th class="th-stanza">Stanza POS</th>
-                <th class="th-qalsadi">Qalsadi Lemma</th>
-                <th class="th-farasa">Farasa Segments</th>
+                <th>CAMeL POS</th>
+                <th>Stanza POS</th>
+                <th>Qalsadi Lemma</th>
+                <th>Farasa Segments</th>
                 <th>Agreement</th>
               </tr>
             </thead>
@@ -97,21 +93,12 @@
                   <td class="arabic word-cell" dir="rtl">{{ row.word }}</td>
                   <td><span :class="posClass(row.camel.pos)">{{ value(row.camel.pos) }}</span></td>
                   <td><span :class="posClass(row.stanza.pos)">{{ value(row.stanza.pos) }}</span></td>
-                  <td><span :class="posClass(row.qalsadi.pos)">{{ value(row.qalsadi.pos) }}</span></td>
+                  <td class="arabic qalsadi-cell" dir="rtl">{{ value(row.qalsadi.lemma) }}</td>
                   <td class="segments">{{ row.farasa.segments || '-' }}</td>
-                  <td>
-                    <span :class="row.agrees ? 'pill pill-green' : 'pill pill-red'">
-                      {{ row.agrees ? 'Agree' : 'Review' }}
-                    </span>
-                  </td>
-                  <td class="arabic qalsadi-cell" dir="rtl">
-                    {{ value(row.qalsadi.lemma) }}
-                  </td>
-                  <td class="segments">{{ row.farasa.segments || '—' }}</td>
                   <td>
                     <div class="agree-cell">
                       <span :class="['pill', row.agrees ? 'pill-green' : 'pill-red']">
-                        {{ row.agrees ? '✅ Agree' : '❌ Review' }}
+                        {{ row.agrees ? 'Agree' : 'Review' }}
                       </span>
                       <span v-if="!row.agrees && row.reason" class="reason-text">
                         {{ row.reason }}
@@ -135,7 +122,7 @@
                     <span class="arabic" dir="rtl">{{ value(row.qalsadi.lemma) }}</span>
                   </td>
                   <td colspan="2">
-                    <strong>Farasa:</strong> {{ row.farasa.segments || '—' }}
+                    <strong>Farasa:</strong> {{ row.farasa.segments || '-' }}
                   </td>
                 </tr>
               </template>
@@ -143,20 +130,19 @@
           </table>
         </div>
 
-        <!-- Summary -->
         <div v-if="summary" class="summary-box">
-          <div class="sum-header">📊 Analysis Summary</div>
+          <div class="sum-header">Analysis Summary</div>
           <div class="sum-grid">
             <div class="sum-item">
               <span class="sum-k">Total Words</span>
               <span class="sum-v">{{ summary.total }}</span>
             </div>
             <div class="sum-item">
-              <span class="sum-k">✅ Agree</span>
+              <span class="sum-k">Agree</span>
               <span class="sum-v green">{{ summary.agree }}</span>
             </div>
             <div class="sum-item">
-              <span class="sum-k">❌ Conflict</span>
+              <span class="sum-k">Conflict</span>
               <span class="sum-v red">{{ summary.conflict }}</span>
             </div>
             <div class="sum-item">
@@ -165,74 +151,31 @@
             </div>
           </div>
         </div>
-
-        <!-- Research Insights -->
-        <details class="research-box" open>
-          <summary>🔬 Research Insights</summary>
-          <div class="research-content">
-            <div class="insight-item">
-              🔵 <strong>CAMeL</strong> uses Statistical MLE trained on Penn Arabic Treebank
-            </div>
-            <div class="insight-item">
-              🟢 <strong>Stanza</strong> uses Neural BiLSTM with Universal Dependencies
-            </div>
-            <div class="insight-item">
-              🟡 <strong>Qalsadi</strong> uses Rule-based dictionary lemmatization (lemma only — no POS)
-            </div>
-            <div class="insight-item">
-              🟣 <strong>Farasa</strong> uses SVM-rank for segmentation (98.94% F1)
-            </div>
-          </div>
-        </details>
       </article>
-
-      <!-- Summary -->
-      <div v-if="summary" class="summary-box">
-        <div class="sum-header">📊 Analysis Summary</div>
-        <div class="sum-grid">
-          <div class="sum-item">
-            <span class="sum-k">Total Words</span>
-            <span class="sum-v">{{ summary.total }}</span>
-          </div>
-          <div class="sum-item">
-            <span class="sum-k">✅ Agree</span>
-            <span class="sum-v green">{{ summary.agree }}</span>
-          </div>
-          <div class="sum-item">
-            <span class="sum-k">❌ Conflict</span>
-            <span class="sum-v red">{{ summary.conflict }}</span>
-          </div>
-          <div class="sum-item">
-            <span class="sum-k">Confidence</span>
-            <span class="sum-v" :class="summary.confClass">{{ summary.confidence }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Research Insights -->
-      <details class="research-box" open>
-        <summary>🔬 Research Insights</summary>
-        <div class="research-content">
-          <div class="insight-item">🔵 <strong>CAMeL</strong> uses Statistical MLE trained on Penn Arabic Treebank</div>
-          <div class="insight-item">🟢 <strong>Stanza</strong> uses Neural BiLSTM with Universal Dependencies</div>
-          <div class="insight-item">🟡 <strong>Qalsadi</strong> uses Rule-based dictionary lemmatization (lemma only — no POS)</div>
-          <div class="insight-item">🟣 <strong>Farasa</strong> uses SVM-rank for segmentation (98.94% F1)</div>
-        </div>
-      </details>
     </section>
   </div>
 </template>
 
 <script setup>
-// Version: 8.3
+// Version: 8.3.1
 import { computed, ref } from 'vue'
-import { analyzeAll } from '../api/nlpApi'
+import { analyzeAll, evaluateText } from '../api/nlpApi'
 
+const POS_UNIFIED = {
+  ADJECTIVE: 'ADJ',
+  ADPOSITION: 'ADP',
+  ADVERB: 'ADV',
+  CONJUNCTION: 'CCONJ',
+  PARTICLE: 'PART',
+  PRONOUN: 'PRON',
+  PUNCTUATION: 'PUNCT',
+}
 
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
 const results = ref(null)
+const evalData = ref(null)
 const showDetails = ref(false)
 
 async function compare() {
@@ -240,12 +183,18 @@ async function compare() {
   loading.value = true
   error.value = ''
   results.value = null
+  evalData.value = null
 
   try {
-    results.value = await analyzeAll(inputText.value)
-  } catch {
-    error.value = 'Failed to connect to the backend. Start the FastAPI server and try again.'
+    const [analysis, evaluation] = await Promise.all([
+      analyzeAll(inputText.value),
+      evaluateText(inputText.value),
+    ])
+    results.value = analysis
+    evalData.value = evaluation.evaluation || null
+  } catch (e) {
     console.error(e)
+    error.value = 'Failed to connect to the backend. Start the FastAPI server and try again.'
   } finally {
     loading.value = false
   }
@@ -256,68 +205,83 @@ const rows = computed(() => {
   const stanza = results.value?.stanza?.tokens || []
   const farasa = results.value?.farasa?.tokens || []
   const qalsadi = results.value?.qalsadi?.tokens || []
-
   const max = Math.max(camel.length, stanza.length, farasa.length, qalsadi.length)
 
   return Array.from({ length: max }, (_, index) => {
-    const camelToken   = camel[index]
-    const camelBest    = camelToken?.analyses?.[0] || {}
-    const stanzaToken  = stanza[index]  || {}
-    const farasaToken  = farasa[index]  || {}
+    const camelToken = camel[index] || {}
+    const camelBest = camelToken.analyses?.[0] || {}
+    const stanzaToken = stanza[index] || {}
+    const farasaToken = farasa[index] || {}
     const qalsadiToken = qalsadi[index] || {}
-    const word = camelToken?.surface || stanzaToken.surface || farasaToken.surface || qalsadiToken.surface || `#${index + 1}`
-    const posValues = [camelBest.pos, stanzaToken.upos, qalsadiToken.pos].filter(Boolean).map(normalizePos)
-    const uniquePos = [...new Set(posValues)]
+    const camelPos = normalizePos(camelBest.pos)
+    const stanzaPos = normalizePos(stanzaToken.upos)
+    const agrees = posAgrees(camelPos, stanzaPos)
 
     return {
       index,
-      word,
-      camel: { pos: camelBest.pos, lemma: camelBest.lemma, root: camelBest.root },
-      stanza: { pos: stanzaToken.upos, lemma: stanzaToken.lemma },
-      farasa: { segments: farasaToken.segmentation?.join(' + ') },
-      qalsadi: {
-        pos: qalsadiToken.pos,
-        lemma: qalsadiToken.lemma,
-        stem: qalsadiToken.stem,
-        posAr: qalsadiToken.pos_ar,
-      },
-      agrees: uniquePos.length <= 1 && uniquePos.length > 0,
+      word: camelToken.surface || stanzaToken.surface || farasaToken.surface || qalsadiToken.surface || `#${index + 1}`,
+      camel: { pos: camelPos, lemma: camelBest.lemma, root: camelBest.root },
+      stanza: { pos: stanzaPos, lemma: stanzaToken.lemma },
+      farasa: { segments: Array.isArray(farasaToken.segmentation) ? farasaToken.segmentation.join(' + ') : '' },
+      qalsadi: { lemma: qalsadiToken.lemma },
+      agrees,
+      reason: agrees ? '' : `CAMeL: ${value(camelPos)} | Stanza: ${value(stanzaPos)}`,
     }
   })
 })
 
 const metrics = computed(() => {
-  const currentRows = rows.value
-  const comparablePos = currentRows.filter(
-    (row) => [row.camel.pos, row.stanza.pos, row.qalsadi.pos].filter(Boolean).length > 1,
-  )
-  const posAgree = comparablePos.filter((row) => row.agrees).length
-
-  const comparableLemma = currentRows.filter(
-    (row) => [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma].filter(Boolean).length > 1,
-  )
-  const lemmaAgree = comparableLemma.filter((row) => {
-    const values = [row.camel.lemma, row.stanza.lemma, row.qalsadi.lemma]
-      .filter(Boolean)
-      .map((x) => String(x).trim())
-    return new Set(values).size <= 1
-  }).length
-
+  const evaluation = evalData.value || {}
+  const posAgreement = evaluation.pos_agreement_pct || '0%'
   return {
-    posAgreement: comparablePos.length ? Math.round((posAgree / comparablePos.length) * 100) : 0,
-    lemmaAgreement: comparableLemma.length ? Math.round((lemmaAgree / comparableLemma.length) * 100) : 0,
-    tokens: currentRows.length,
-    qalsadiTokens: currentRows.filter((row) => row.qalsadi.lemma || row.qalsadi.pos).length,
+    posAgreement,
+    posAgreementValue: parsePercent(posAgreement),
+    lemmaAgreement: evaluation.lemma_match_pct || '0%',
+    posF1: typeof evaluation.pos_f1 === 'number' ? evaluation.pos_f1.toFixed(3) : '0.000',
+    segmentationCoverage: typeof evaluation.segmentation_coverage === 'number'
+      ? `${Math.round(evaluation.segmentation_coverage * 100)}%`
+      : '0%',
   }
 })
 
+const summary = computed(() => {
+  const total = rows.value.length
+  const agree = rows.value.filter((row) => row.agrees).length
+  const conflict = total - agree
+  const pct = total ? Math.round((agree / total) * 100) : 0
+
+  return {
+    total,
+    agree,
+    conflict,
+    confidence: `${pct}%`,
+    confClass: pct >= 75 ? 'green' : pct >= 50 ? 'amber' : 'red',
+  }
+})
 
 function normalizePos(pos) {
   const value = String(pos || '').toUpperCase()
-  if (value === 'ADJECTIVE') return 'ADJ'
-  if (value === 'ADPOSITION') return 'ADP'
-  if (value === 'PRONOUN') return 'PRON'
-  return value
+  return POS_UNIFIED[value] || value
+}
+
+function posAgrees(camelPos, stanzaPos) {
+  if (!camelPos || !stanzaPos) return false
+  return camelPos === stanzaPos
+}
+
+function parsePercent(value) {
+  const parsed = Number.parseFloat(String(value).replace('%', ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function metricColor(value) {
+  if (value >= 75) return 'metric-good'
+  if (value >= 50) return 'metric-warn'
+  return 'metric-bad'
+}
+
+function rowClass(row) {
+  return row.agrees ? 'row-agree' : 'row-conflict'
 }
 
 function posClass(pos) {
@@ -336,6 +300,7 @@ function value(item) {
 function clear() {
   inputText.value = ''
   results.value = null
+  evalData.value = null
   error.value = ''
 }
 
@@ -376,14 +341,34 @@ function loadSample() {
   font-weight: 800;
 }
 
+.metric-good { border-color: rgba(21, 128, 61, 0.3); }
+.metric-warn { border-color: rgba(180, 83, 9, 0.3); }
+.metric-bad { border-color: rgba(180, 35, 24, 0.3); }
+
 .word-cell {
   font-size: 18px;
   font-weight: 900;
 }
 
+.qalsadi-cell,
 .segments {
   color: var(--violet);
   font-weight: 800;
+}
+
+.agree-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.reason-text {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.row-conflict td {
+  background: #fffafa;
 }
 
 .detail-row td {

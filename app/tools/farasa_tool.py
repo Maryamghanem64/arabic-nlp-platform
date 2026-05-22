@@ -24,6 +24,10 @@ def load_farasa() -> None:
 
 
 def farasa_analyze(text: str) -> Dict[str, Any]:
+    global farasa_segmenter
+    if not farasa_segmenter:
+        load_farasa()
+
     if not farasa_segmenter:
         return {"tool": "farasa", "status": "failed", "error": "Farasa not loaded", "tokens": []}
 
