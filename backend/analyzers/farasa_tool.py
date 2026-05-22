@@ -4,6 +4,7 @@ import time
 from typing import Any, Dict, List
 
 from farasa.segmenter import FarasaSegmenter
+from camel_tools.tokenizers.word import simple_word_tokenize
 
 from backend.analyzers.base import Analyzer
 from backend.utils.text_norm import normalize_whitespace
@@ -19,10 +20,8 @@ class FarasaTool(Analyzer):
         t0 = time.time()
         segmented = self._segmenter.segment(normalize_whitespace(text))
 
-        raw_tokens = []
+        raw_tokens: List[str] = []
         try:
-            from camel_tools.tokenizers.word import simple_word_tokenize
-
             raw_tokens = simple_word_tokenize(text)
         except Exception:
             raw_tokens = text.split()

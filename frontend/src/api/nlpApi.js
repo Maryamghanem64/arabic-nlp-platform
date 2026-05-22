@@ -1,26 +1,30 @@
+// Version: 8.3
 import axios from 'axios'
 
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000',
+  // Tools like Stanza/Farasa can be slow; keep a long timeout.
+  timeout: 240000,
+})
 
-export async function analyzeAll(text, timeout = 240000) {
-  const { data } = await axios.get(`${API}/analyze-combined`, {
+export async function analyzeAll(text) {
+  const { data } = await api.get('/analyze-combined', {
     params: { text },
-    timeout,
   })
   return data
 }
 
-export async function evaluateText(text, timeout = 240000) {
-  const { data } = await axios.get(`${API}/evaluate?text=${encodeURIComponent(text)}`, {
-    timeout,
-  })
-  return data
-}
-
-export async function fusionText(text, timeout = 240000) {
-  const { data } = await axios.get(`${API}/fusion`, {
+export async function evaluateText(text) {
+  const { data } = await api.get('/evaluate', {
     params: { text },
-    timeout,
   })
   return data
 }
+
+export async function fusionText(text) {
+  const { data } = await api.get('/fusion', {
+    params: { text },
+  })
+  return data
+}
+

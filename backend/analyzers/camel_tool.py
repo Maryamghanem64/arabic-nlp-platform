@@ -27,7 +27,6 @@ POS_MAP = {
     "punc": "PUNCTUATION",
 }
 
-
 POS_UNIFIED = {
     "NOUN": "NOUN",
     "VERB": "VERB",
@@ -40,7 +39,6 @@ POS_UNIFIED = {
     "PUNCTUATION": "PUNCT",
     "CONJ_SUB": "SCONJ",
 }
-
 
 WEAK_VERB_ROOTS = {
     "ق.قل": "ق.وَل",
@@ -114,7 +112,6 @@ GLOSS_NOISE = {
 def map_pos(pos: Optional[str]) -> Optional[str]:
     if not pos:
         return None
-    # pos from CAMeL is like noun/verb/adj...
     key = pos.strip().lower()
     mapped = POS_MAP.get(key)
     if not mapped:
@@ -132,14 +129,6 @@ def confidence_bucket(score: float) -> str:
     if score >= 0.6:
         return "medium"
     return "low"
-
-
-def strip_diacritics(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    import re
-
-    return re.sub(r"[\u064B-\u065F\u0670]", "", text)
 
 
 def simplify_gloss(gloss: Optional[str]) -> Optional[str]:
@@ -190,7 +179,7 @@ def correct_number(surface: str, number: str, segmentation: List[str], pos: str)
 class CamelTool(Analyzer):
     tool_name = "camel"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._db = MorphologyDB.builtin_db()
         self._disambiguator = MLEDisambiguator.pretrained()
 
@@ -217,7 +206,7 @@ class CamelTool(Analyzer):
                 )
                 clean_gloss = part_gloss or simplify_gloss(raw_gloss)
 
-                corrected_num, num_fixed = correct_number(
+                corrected_num, _ = correct_number(
                     token,
                     NUMBER_MAP.get(features.get("num")),
                     segs,
@@ -237,7 +226,7 @@ class CamelTool(Analyzer):
                         "gloss": clean_gloss,
                         "confidence": score,
                         "confidence_level": confidence_bucket(score),
-                        "corrections": ["number"] if num_fixed else [],
+                        "corrections": [],
                     }
                 )
 
