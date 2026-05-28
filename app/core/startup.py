@@ -8,14 +8,14 @@ from app.services.cache_service import cached_analyze, clear_cache
 from app.services.eval_service import evaluate_tools
 from app.services.fusion_service import fusion_system
 from app.tools.alkhalil_tool import alkhalil_analyze
-from app.tools.arabert_tool import arabert_analyze
+from app.tools.arabert_tool import arabert_analyze, load_arabert
 from app.tools.camel_tool import camel_analyze
 from app.tools.farasa_tool import farasa_analyze
-from app.tools.madamira_tool import madamira_analyze
+from app.tools.madamira_tool import madamira_analyze, load_madamira
 from app.tools.qalsadi_tool import qalsadi_analyze
 from app.tools.sinatools_tool import sinatools_analyze
 from app.tools.stanza_tool import stanza_analyze
-from app.tools.udpipe_tool import udpipe_analyze
+from app.tools.udpipe_tool import udpipe_analyze, load_udpipe
 
 
 ANALYZERS: Dict[str, Callable[[str], Dict[str, Any]]] = {

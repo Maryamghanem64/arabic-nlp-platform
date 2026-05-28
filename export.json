@@ -1,0 +1,256 @@
+{
+  "input": "كتب الطالب الدرس",
+  "combined": {
+    "camel": {
+      "tool": "camel",
+      "status": "ok",
+      "input": "كتب الطالب الدرس",
+      "word_count": 3,
+      "tokens": [
+        {
+          "surface": "كتب",
+          "analyses": [
+            {
+              "lemma": "كَتَب",
+              "root": "ك.ت.ب",
+              "root_type": "triliteral",
+              "pos": "VERB",
+              "gender": "masculine",
+              "number": "singular",
+              "tense": "past",
+              "gloss": "write",
+              "confidence": 1.0,
+              "confidence_level": "high",
+              "corrections": [
+                "gloss"
+              ]
+            }
+          ],
+          "segmentation": [
+            "كتب"
+          ]
+        },
+        {
+          "surface": "الطالب",
+          "analyses": [
+            {
+              "lemma": "طالِب",
+              "root": "ط.ل.ب",
+              "root_type": "triliteral",
+              "pos": "NOUN",
+              "gender": "masculine",
+              "number": "singular",
+              "tense": null,
+              "gloss": "student",
+              "confidence": 1.0,
+              "confidence_level": "high",
+              "corrections": [
+                "gloss"
+              ]
+            }
+          ],
+          "segmentation": [
+            "الطالب"
+          ]
+        },
+        {
+          "surface": "الدرس",
+          "analyses": [
+            {
+              "lemma": "دَرْس",
+              "root": "د.ر.س",
+              "root_type": "triliteral",
+              "pos": "NOUN",
+              "gender": "masculine",
+              "number": "singular",
+              "tense": null,
+              "gloss": "lesson",
+              "confidence": 1.0,
+              "confidence_level": "high",
+              "corrections": [
+                "gloss"
+              ]
+            }
+          ],
+          "segmentation": [
+            "الدرس"
+          ]
+        }
+      ]
+    },
+    "farasa": {
+      "tool": "farasa",
+      "status": "ok",
+      "input": "كتب الطالب الدرس",
+      "word_count": 3,
+      "segmented_text": "كتب ال+طالب ال+درس",
+      "tokens": [
+        {
+          "surface": "كتب",
+          "analyses": [],
+          "segmentation": [
+            "كتب"
+          ]
+        },
+        {
+          "surface": "الطالب",
+          "analyses": [],
+          "segmentation": [
+            "ال",
+            "طالب"
+          ]
+        },
+        {
+          "surface": "الدرس",
+          "analyses": [],
+          "segmentation": [
+            "ال",
+            "درس"
+          ]
+        }
+      ]
+    },
+    "stanza": {
+      "tool": "stanza",
+      "status": "unavailable",
+      "reason": "Run python install_models.py to download stanza Arabic models.",
+      "input": "كتب الطالب الدرس",
+      "word_count": 0,
+      "tokens": []
+    },
+    "qalsadi": {
+      "tool": "qalsadi",
+      "status": "ok",
+      "approach": "rule-based lemmatization",
+      "input": "كتب الطالب الدرس",
+      "word_count": 3,
+      "tokens": [
+        {
+          "surface": "كتب",
+          "lemma": "تب",
+          "pos": null,
+          "stem": null
+        },
+        {
+          "surface": "الطالب",
+          "lemma": "طالب",
+          "pos": null,
+          "stem": null
+        },
+        {
+          "surface": "الدرس",
+          "lemma": "درس",
+          "pos": null,
+          "stem": null
+        }
+      ]
+    }
+  },
+  "fusion": {
+    "text": "كتب الطالب الدرس",
+    "fusion": [
+      {
+        "word": "كتب",
+        "final": {
+          "segmentation": [
+            "كتب"
+          ],
+          "lemma": "كَتَب",
+          "root": "ك.ت.ب",
+          "root_type": "triliteral",
+          "gloss": "write",
+          "pos": "VERB",
+          "gender": "masculine",
+          "number": "singular",
+          "tense": "past",
+          "confidence_score": 0.9,
+          "confidence_level": "high"
+        },
+        "sources": {
+          "segmentation": "farasa",
+          "lemma": "camel",
+          "root": "camel",
+          "gloss": "camel",
+          "pos": "camel_only",
+          "morphology": "camel"
+        },
+        "confidence": "high",
+        "notes": [],
+        "conflicts": []
+      },
+      {
+        "word": "الطالب",
+        "final": {
+          "segmentation": [
+            "ال",
+            "طالب"
+          ],
+          "lemma": "طالِب",
+          "root": "ط.ل.ب",
+          "root_type": "triliteral",
+          "gloss": "student",
+          "pos": "NOUN",
+          "gender": "masculine",
+          "number": "singular",
+          "tense": null,
+          "confidence_score": 0.9,
+          "confidence_level": "high"
+        },
+        "sources": {
+          "segmentation": "farasa",
+          "lemma": "camel",
+          "root": "camel",
+          "gloss": "camel",
+          "pos": "camel_only",
+          "morphology": "camel"
+        },
+        "confidence": "high",
+        "notes": [],
+        "conflicts": []
+      },
+      {
+        "word": "الدرس",
+        "final": {
+          "segmentation": [
+            "ال",
+            "درس"
+          ],
+          "lemma": "دَرْس",
+          "root": "د.ر.س",
+          "root_type": "triliteral",
+          "gloss": "lesson",
+          "pos": "NOUN",
+          "gender": "masculine",
+          "number": "singular",
+          "tense": null,
+          "confidence_score": 0.9,
+          "confidence_level": "high"
+        },
+        "sources": {
+          "segmentation": "farasa",
+          "lemma": "camel",
+          "root": "camel",
+          "gloss": "camel",
+          "pos": "camel_only",
+          "morphology": "camel"
+        },
+        "confidence": "high",
+        "notes": [],
+        "conflicts": []
+      }
+    ]
+  },
+  "evaluation": {
+    "total_words": 3,
+    "pos_agreement": 0.0,
+    "pos_agreement_pct": "0.0%",
+    "pos_precision": 0.0,
+    "pos_recall": 0.0,
+    "pos_f1": 0.0,
+    "lemma_match": 0.0,
+    "lemma_match_pct": "0.0%",
+    "segmentation_coverage": 1.0,
+    "pos_conflicts": [],
+    "all_conflicts": []
+  }
+}

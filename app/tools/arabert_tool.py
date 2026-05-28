@@ -1,27 +1,103 @@
-from __future__ import annotations
+import threading
+import logging
 
-from typing import Any, Dict
+logger = logging.getLogger(__name__)
 
-from app.core.tool_registry import has_module, unavailable_result
+arabert_pipeline = None
+arabert_loaded   = False
+arabert_loading  = False
+arabert_lock     = threading.Lock()
 
+def load_arabert():
+    global arabert_pipeline, arabert_loaded, arabert_loading
 
-def arabert_analyze(text: str) -> Dict[str, Any]:
-    if not has_module("transformers"):
-        return unavailable_result("arabert", "Optional AraBERT unavailable: missing transformers package.", text)
-    if not has_module("torch"):
-        return unavailable_result("arabert", "Optional AraBERT unavailable: missing torch package.", text)
-    return unavailable_result(
-        "arabert",
-        "AraBERT package dependencies are present, but contextual analysis is not configured in this project.",
-        text,
-    )
+    if arabert_loaded:
+        return True
+    if arabert_loading:
+        return False
 
+    arabert_loading = True
+    try:
+        from transformers import pipeline
+        arabert_pipeline = pipeline(
+            "fill-mask",
+            model="aubmindlab/bert-base-arabertv2",
+            device=-1
+        )
+        arabert_loaded = True
+        logger.info("✅ AraBERT lazy-loaded")
+        return True
+    except Exception as e:
+        arabert_pipeline = None
+        arabert_loaded   = False
+        logger.warning(f"⚠️ AraBERT failed: {e}")
+        return False
+    finally:
+        arabert_loading = False
 
-class AraBERTTool:
-    tool_name = "arabert"
+def get_arabert_status():
+    if arabert_loaded:   return "ok"
+    if arabert_loading:  return "loading"
+    return "lazy"
 
-    def analyze(self, text: str) -> Dict[str, Any]:
-        return arabert_analyze(text)
+def arabert_analyze(text: str) -> dict:
+    global arabert_pipeline
 
-    def is_loaded(self) -> bool:
-        return has_module("transformers") and has_module("torch")
+    # Lazy load on first request
+    if arabert_pipeline is None:
+        loaded = load_arabert()
+        if not loaded or arabert_pipeline is None:
+            return {
+                "tool":       "arabert",
+                "status":     "unavailable",
+                "reason":     "AraBERT model not loaded. First request triggers download (~700MB).",
+                "input":      text,
+                "word_count": 0,
+                "tokens":     []
+            }
+
+    try:
+        from camel_tools.tokenizers.word import simple_word_tokenize
+        tokens_text = simple_word_tokenize(text)
+        tokens = []
+
+        with arabert_lock:
+            for word in tokens_text:
+                # Use fill-mask to get confidence of this word
+                masked = text.replace(word, "[MASK]", 1)
+                try:
+                    results = arabert_pipeline(masked, top_k=1)
+                    confidence = results[0]["score"] if results else 0.0
+                except Exception:
+                    confidence = 0.0
+
+                tokens.append({
+                    "surface":    word,
+                    "lemma":      None,
+                    "pos":        None,
+                    "root":       None,
+                    "gloss":      None,
+                    "confidence": round(confidence, 4),
+                })
+
+        return {
+            "tool":       "arabert",
+            "status":     "ok",
+            "approach":   "contextual fill-mask (BERT)",
+            "input":      text,
+            "word_count": len(tokens),
+            "tokens":     tokens,
+            "lemmas":     [],
+            "pos":        [],
+            "reason":     "",
+        }
+    except Exception as e:
+        logger.error(f"[ARABERT] error: {e}")
+        return {
+            "tool":       "arabert",
+            "status":     "error",
+            "reason":     str(e),
+            "input":      text,
+            "word_count": 0,
+            "tokens":     []
+        }

@@ -40,6 +40,41 @@ def startup_report():
     return {"tools": statuses}
 
 
+@router.get("/analyze/arabert")
+def analyze_arabert(text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+    from app.core.tool_registry import cached_analyze
+    from app.tools.arabert_tool import arabert_analyze
+    return cached_analyze(arabert_analyze, text)
+
+
+@router.get("/analyze/alkhalil")
+def analyze_alkhalil(text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+    from app.core.tool_registry import cached_analyze
+    from app.tools.alkhalil_tool import alkhalil_analyze
+    return cached_analyze(alkhalil_analyze, text)
+
+
+@router.get("/analyze/udpipe")
+def analyze_udpipe(text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+    from app.core.tool_registry import cached_analyze
+    from app.tools.udpipe_tool import udpipe_analyze
+    return cached_analyze(udpipe_analyze, text)
+
+
+@router.get("/analyze/madamira")
+def analyze_madamira(text: str):
+    if not text or not text.strip():
+        raise HTTPException(400, "Empty text")
+    from app.tools.madamira_tool import madamira_analyze
+    return madamira_analyze(text)
+
+
 @router.get("/analyze/{tool}")
 def analyze_by_tool(tool: str, text: str):
     if not text or not text.strip():
@@ -61,5 +96,8 @@ def analyze_by_tool(tool: str, text: str):
 def analyze_combined(text: str):
     if not text or not text.strip():
         raise HTTPException(400, "Empty text")
+
+    # Run all registered tools in parallel (includes arabert/alkhalil/udpipe/madamira)
     results = run_all_registered_tools(text)
     return {"input": text, **results}
+

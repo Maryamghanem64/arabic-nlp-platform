@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
+
 from app.utils.logger import logger
 
 
@@ -16,15 +17,30 @@ OPTIONAL_TOOLS = ("arabert", "alkhalil", "udpipe", "madamira", "sinatools")
 ALL_TOOLS = CORE_TOOLS + OPTIONAL_TOOLS
 
 
-def unavailable_result(tool: str, reason: str, text: str = "") -> Dict[str, Any]:
+def unified_result(
+    tool: str,
+    status: str,
+    tokens: List[Any] | None = None,
+    lemmas: List[Any] | None = None,
+    pos: List[Any] | None = None,
+    reason: str = "",
+) -> Dict[str, Any]:
     return {
         "tool": tool,
-        "status": "unavailable",
-        "reason": reason,
-        "input": text,
-        "word_count": 0,
-        "tokens": [],
+        "status": status,
+        "tokens": tokens or [],
+        "lemmas": lemmas or [],
+        "pos": pos or [],
+        "reason": reason or "",
     }
+
+
+
+
+def unavailable_result(tool: str, reason: str, text: str = "") -> Dict[str, Any]:
+    # Keep signature for existing callers, but always return the unified schema.
+    return unified_result(tool=tool, status="unavailable", tokens=[], lemmas=[], pos=[], reason=reason)
+
 
 
 def safe_import(module_name: str):
@@ -70,8 +86,13 @@ def farasa_bins_present() -> bool:
 
 
 def stanza_model_present() -> bool:
-    stanza_home = Path(os.environ.get("STANZA_RESOURCES_DIR", Path.home() / "stanza_resources"))
-    return (stanza_home / "ar").exists()
+    possible_paths = [
+        Path.home() / "stanza_resources" / "ar",
+        Path.home() / "AppData" / "Local" / "StanfordNLP" / "stanza" / "resources" / "ar",
+        Path.home() / "AppData" / "Local" / "StanfordNLP" / "stanza" / "Cache" / "1.12.0" / "resources" / "ar",
+    ]
+
+    return any(path.exists() for path in possible_paths)
 
 
 def model_path_status(env_name: str, default_relative: str, missing_status: str) -> Dict[str, Any]:
@@ -87,7 +108,13 @@ def model_path_status(env_name: str, default_relative: str, missing_status: str)
 
 
 def detect_tool_status() -> Dict[str, Dict[str, Any]]:
+    # AlKhalil jar resolver lives in the centralized tool_paths module.
+    from backend.config.tool_paths import AlKhalilPaths
+
+    jar_resolver = AlKhalilPaths()
+
     java = java_status()
+
     statuses: Dict[str, Dict[str, Any]] = {}
 
     statuses["camel"] = (
@@ -124,14 +151,47 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
         else {"status": "missing_dependency", "reason": "Install qalsadi and camel-tools."}
     )
 
-    statuses["arabert"] = (
-        {"status": "ok", "reason": "transformers and torch detected. Model download may still be needed."}
-        if has_module("transformers") and has_module("torch")
-        else {"status": "missing_dependency", "reason": "Optional AraBERT requires transformers and torch."}
-    )
+    # AraBERT lazy-loading status (server startup should not block)
+    # If arabert_tool is importable, report its current lazy state.
+    try:
+        from app.tools import arabert_tool as _arabert_tool
 
-    alkhalil_path = model_path_status("ALKHALIL_JAR", "tools/alkhalil/alkhalil.jar", "missing_model")
-    statuses["alkhalil"] = alkhalil_path if java["status"] == "ok" else {"status": "missing_java", "reason": "AlKhalil requires Java.", "java": java}
+        status = _arabert_tool.get_arabert_status()
+        statuses["arabert"] = {
+            "status": status,
+            "reason": "Lazy — loads on first request (~700MB)" if status != "ok" else "",
+        }
+    except Exception:
+        statuses["arabert"] = (
+            {"status": "ok", "reason": "transformers and torch detected. Model download may still be needed."}
+            if has_module("transformers") and has_module("torch")
+            else {"status": "missing_dependency", "reason": "Optional AraBERT requires transformers and torch."}
+        )
+
+
+    alkhalil_jar = jar_resolver.resolve()
+
+    alkhalil_file_exists = alkhalil_jar.exists() and alkhalil_jar.is_file()
+
+    if java["status"] != "ok":
+        statuses["alkhalil"] = {
+            "status": "missing_java",
+            "reason": "AlKhalil requires Java.",
+            "java": java,
+            "resolved_jar": str(alkhalil_jar),
+            "jar_exists": bool(alkhalil_file_exists),
+        }
+    else:
+        statuses["alkhalil"] = {
+            "status": "ok" if alkhalil_file_exists else "missing_model",
+            "reason": (
+                f"AlKhalil JAR detected at {alkhalil_jar}."
+                if alkhalil_file_exists
+                else "AlKhalil JAR not found. Set ALKHALIL_JAR or ensure the jar exists under app/tools/alkhalil/AlKhalil1.1/Alkhalil.jar."
+            ),
+            "resolved_jar": str(alkhalil_jar),
+            "jar_exists": bool(alkhalil_file_exists),
+        }
 
     statuses["udpipe"] = (
         {"status": "ok", "reason": "ufal.udpipe package detected."}
@@ -139,8 +199,17 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
         else {"status": "missing_dependency", "reason": "Optional UDPipe requires ufal.udpipe and Arabic model files."}
     )
 
-    madamira_path = model_path_status("MADAMIRA_HOME", "tools/madamira", "missing_model")
-    statuses["madamira"] = madamira_path if java["status"] == "ok" else {"status": "missing_java", "reason": "MADAMIRA requires Java.", "java": java}
+    # MADAMIRA is optional: only mark as ok if it's configured + present; otherwise disabled.
+    if java["status"] != "ok":
+        statuses["madamira"] = {"status": "disabled", "reason": "MADAMIRA requires Java.", "java": java}
+    else:
+        madamira_path = model_path_status("MADAMIRA_HOME", "tools/madamira", "missing_model")
+        statuses["madamira"] = (
+            madamira_path
+            if madamira_path.get("status") == "ok"
+            else {"status": "disabled", "reason": madamira_path.get("reason", "MADAMIRA not configured."), "path": madamira_path.get("path")}
+        )
+
 
     statuses["sinatools"] = {
         "status": "future_work",
@@ -154,25 +223,34 @@ def is_available(status: Dict[str, Any]) -> bool:
     return status.get("status") == "ok"
 
 
+
 def safe_analyze(tool: str, analyzer: Callable[[str], Dict[str, Any]], text: str) -> Dict[str, Any]:
     try:
         result = analyzer(text)
         if not isinstance(result, dict):
             return unavailable_result(tool, "Analyzer returned an invalid response.", text)
+
+        # Normalize to unified schema without breaking existing adapters.
         result.setdefault("tool", tool)
+        result.setdefault("status", "ok")
         result.setdefault("tokens", [])
-        result.setdefault("word_count", len(result.get("tokens", []) or []))
-        return result
+        result.setdefault("lemmas", [])
+        result.setdefault("pos", [])
+        result.setdefault("reason", "")
+
+        # Drop legacy keys if present? Keep them; frontend may ignore.
+        return {
+            "tool": result.get("tool", tool),
+            "status": result.get("status", "ok"),
+            "tokens": result.get("tokens", []) or [],
+            "lemmas": result.get("lemmas", []) or [],
+            "pos": result.get("pos", []) or [],
+            "reason": result.get("reason", "") or "",
+        }
     except Exception as exc:
         logger.exception("[%s] safe analyzer failure", tool)
-        return {
-            "tool": tool,
-            "status": "error",
-            "reason": str(exc),
-            "input": text,
-            "word_count": 0,
-            "tokens": [],
-        }
+        return unified_result(tool=tool, status="error", tokens=[], lemmas=[], pos=[], reason=str(exc))
+
 
 
 def startup_report_lines(statuses: Dict[str, Dict[str, Any]] | None = None) -> List[str]:
@@ -191,3 +269,4 @@ def log_startup_report() -> Dict[str, Dict[str, Any]]:
     for line in startup_report_lines(statuses):
         logger.info(line)
     return statuses
+

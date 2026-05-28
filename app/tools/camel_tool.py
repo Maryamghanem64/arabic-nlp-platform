@@ -23,9 +23,16 @@ def _ensure_imports() -> bool:
     if MorphologyDB and MLEDisambiguator and simple_word_tokenize:
         return True
     try:
+        # Ensure emoji compatibility before importing camel-tools.
+        # Some camel-tools versions import emoji.EMOJI_DATA at import-time.
+        from backend.utils.emoji_compat import ensure_emoji_emoji_data
+
+        ensure_emoji_emoji_data()
+
         from camel_tools.disambig.mle import MLEDisambiguator as _MLEDisambiguator
         from camel_tools.morphology.database import MorphologyDB as _MorphologyDB
         from camel_tools.tokenizers.word import simple_word_tokenize as _simple_word_tokenize
+
 
         MorphologyDB = _MorphologyDB
         MLEDisambiguator = _MLEDisambiguator

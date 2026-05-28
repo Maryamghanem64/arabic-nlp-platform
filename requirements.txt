@@ -9,5 +9,11 @@ stanza>=1.8
 qalsadi>=0.5
 farasapy>=0.0.14
 
+# Compatibility pins
+# camel-tools' utils.charsets imports emoji.EMOJI_DATA internally.
+# emoji>=2 removed EMOJI_DATA; emoji<=1.4.2 keeps it compatible.
+emoji==1.4.2
+
+
 # Utilities
 requests>=2.31

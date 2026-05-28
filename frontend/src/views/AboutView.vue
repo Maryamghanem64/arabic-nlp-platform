@@ -46,6 +46,7 @@
 
     <section class="panel panel-pad">
       <h2 class="section-title">Feature Matrix</h2>
+
       <div class="table-scroll matrix-table">
         <table>
           <thead>
@@ -55,8 +56,14 @@
               <th>Farasa</th>
               <th>Stanza</th>
               <th>Qalsadi</th>
+              <th>AraBERT</th>
+              <th>UDPipe</th>
+              <th>AlKhalil</th>
+              <th>MADAMIRA</th>
+              <th>SinaTools</th>
             </tr>
           </thead>
+
           <tbody>
             <tr v-for="row in featureRows" :key="row.feature">
               <td>{{ row.feature }}</td>
@@ -64,6 +71,11 @@
               <td>{{ mark(row.farasa) }}</td>
               <td>{{ mark(row.stanza) }}</td>
               <td>{{ mark(row.qalsadi) }}</td>
+              <td>{{ mark(row.arabert) }}</td>
+              <td>{{ mark(row.udpipe) }}</td>
+              <td>{{ mark(row.alkhalil) }}</td>
+              <td>{{ mark(row.madamira) }}</td>
+              <td>{{ mark(row.sinatools) }}</td>
             </tr>
           </tbody>
         </table>
@@ -78,37 +90,78 @@ const tools = [
     name: 'CAMeL Tools',
     type: 'Morphology',
     pill: 'pill pill-blue',
-    description: 'Arabic morphological disambiguation, root, lemma, POS, gender, number, and tense.',
+    description:
+      'Arabic morphological disambiguation, root, lemma, POS, gender, number, and tense.',
   },
   {
     name: 'Farasa',
     type: 'Segmentation',
     pill: 'pill pill-violet',
-    description: 'Fast token segmentation and clitic splitting for Arabic text.',
+    description:
+      'Fast token segmentation and clitic splitting for Arabic text.',
   },
   {
     name: 'Stanza',
     type: 'Syntax',
     pill: 'pill pill-green',
-    description: 'Universal Dependencies pipeline with POS, lemma, and dependency relations.',
+    description:
+      'Universal Dependencies pipeline with POS, lemma, dependency parsing, and neural linguistic analysis.',
   },
   {
     name: 'Qalsadi',
     type: 'Rule-based',
     pill: 'pill pill-amber',
-    description: 'Rule-based Arabic lemmatizer that provides lemmas, stems, unvocalized forms, and Arabic POS tags.',
+    description:
+      'Rule-based Arabic lemmatizer providing stems, lemmas, POS tags, and lexical evidence.',
+  },
+
+  {
+    name: 'AraBERT',
+    type: 'Transformer',
+    pill: 'pill pill-rose',
+    description:
+      'Transformer-based Arabic language model for contextual embeddings and semantic analysis.',
+  },
+  {
+    name: 'UDPipe',
+    type: 'UD Parser',
+    pill: 'pill pill-cyan',
+    description:
+      'Universal Dependencies parser for tokenization, POS tagging, and syntactic dependency analysis.',
+  },
+  {
+    name: 'AlKhalil',
+    type: 'Java Analyzer',
+    pill: 'pill pill-orange',
+    description:
+      'Classical Arabic morphological analyzer based on roots and patterns.',
+  },
+  {
+    name: 'MADAMIRA',
+    type: 'Enterprise NLP',
+    pill: 'pill pill-red',
+    description:
+      'Hybrid Arabic NLP system combining morphological analysis, disambiguation, and POS tagging.',
+  },
+  {
+    name: 'SinaTools',
+    type: 'Research AI',
+    pill: 'pill pill-slate',
+    description:
+      'Large-scale Arabic NLP toolkit and future microservice integration for advanced processing.',
   },
 ]
 
 const featureRows = [
-  { feature: 'Lemma', camel: true, farasa: false, stanza: true, qalsadi: true },
-  { feature: 'Stem', camel: false, farasa: false, stanza: false, qalsadi: true },
-  { feature: 'Root', camel: true, farasa: false, stanza: false, qalsadi: false },
-  { feature: 'POS', camel: true, farasa: false, stanza: true, qalsadi: true },
-  { feature: 'Gender', camel: true, farasa: false, stanza: true, qalsadi: false },
-  { feature: 'Number', camel: true, farasa: false, stanza: true, qalsadi: false },
-  { feature: 'Segmentation', camel: false, farasa: true, stanza: false, qalsadi: false },
-  { feature: 'Dependency', camel: false, farasa: false, stanza: true, qalsadi: false },
+  { feature: 'Lemma', camel: true, farasa: false, stanza: true, qalsadi: true, arabert: false, udpipe: true, alkhalil: true, madamira: true, sinatools: true },
+  { feature: 'Stem', camel: false, farasa: false, stanza: false, qalsadi: true, arabert: false, udpipe: false, alkhalil: true, madamira: true, sinatools: false },
+  { feature: 'Root', camel: true, farasa: false, stanza: false, qalsadi: false, arabert: false, udpipe: false, alkhalil: true, madamira: true, sinatools: false },
+  { feature: 'POS', camel: true, farasa: false, stanza: true, qalsadi: true, arabert: true, udpipe: true, alkhalil: true, madamira: true, sinatools: true },
+  { feature: 'Gender', camel: true, farasa: false, stanza: true, qalsadi: false, arabert: false, udpipe: true, alkhalil: true, madamira: true, sinatools: false },
+  { feature: 'Number', camel: true, farasa: false, stanza: true, qalsadi: false, arabert: false, udpipe: true, alkhalil: true, madamira: true, sinatools: false },
+  { feature: 'Segmentation', camel: false, farasa: true, stanza: false, qalsadi: false, arabert: false, udpipe: true, alkhalil: false, madamira: true, sinatools: true },
+  { feature: 'Dependency', camel: false, farasa: false, stanza: true, qalsadi: false, arabert: false, udpipe: true, alkhalil: false, madamira: false, sinatools: false },
+  { feature: 'Transformer Embeddings', camel: false, farasa: false, stanza: false, qalsadi: false, arabert: true, udpipe: false, alkhalil: false, madamira: false, sinatools: true },
 ]
 
 function mark(value) {
@@ -175,6 +228,11 @@ code {
 
 .matrix-table {
   margin-top: 18px;
+  overflow-x: auto;
+}
+
+.matrix-table table {
+  min-width: 1200px;
 }
 
 .matrix-table td:not(:first-child),
@@ -188,4 +246,11 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* Pills */
+.pill-rose { background: #ffe4ef; color: #be185d; }
+.pill-cyan { background: #dff7ff; color: #0f766e; }
+.pill-orange { background: #fff1df; color: #c2410c; }
+.pill-red { background: #ffe2e2; color: #b91c1c; }
+.pill-slate { background: #e5e7eb; color: #334155; }
 </style>

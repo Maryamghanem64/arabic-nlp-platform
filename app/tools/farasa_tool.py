@@ -23,8 +23,15 @@ def _ensure_imports() -> bool:
     if FarasaSegmenter and simple_word_tokenize:
         return True
     try:
+        # Farasapy may transitively import camel-tools, which expects
+        # emoji.EMOJI_DATA at import-time. Patch it before imports.
+        from backend.utils.emoji_compat import ensure_emoji_emoji_data
+
+        ensure_emoji_emoji_data()
+
         from camel_tools.tokenizers.word import simple_word_tokenize as _simple_word_tokenize
         from farasa.segmenter import FarasaSegmenter as _FarasaSegmenter
+
 
         FarasaSegmenter = _FarasaSegmenter
         simple_word_tokenize = _simple_word_tokenize

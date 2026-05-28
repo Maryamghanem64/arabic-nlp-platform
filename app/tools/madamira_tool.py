@@ -3,30 +3,61 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
-from app.core.tool_registry import PROJECT_ROOT, unavailable_result
+from app.utils.logger import logger
 
 
-def _madamira_home() -> Path:
-    configured = os.environ.get("MADAMIRA_HOME")
-    return Path(configured) if configured else PROJECT_ROOT / "tools" / "madamira"
+madamira_available = False
+
+
+def load_madamira() -> None:
+    global madamira_available
+
+    madamira_home = os.environ.get("MADAMIRA_HOME", "")
+    madamira_dir = Path(__file__).resolve().parents[2] / "tools" / "madamira"
+
+    if madamira_home and Path(madamira_home).is_dir():
+        madamira_available = True
+        logger.info(f"✅ MADAMIRA found: {madamira_home}")
+    elif madamira_dir.is_dir():
+        madamira_available = True
+        logger.info(f"✅ MADAMIRA found: {madamira_dir}")
+    else:
+        madamira_available = False
+        logger.info("⏳ MADAMIRA not configured — marked as optional")
 
 
 def madamira_analyze(text: str) -> Dict[str, Any]:
-    if not shutil.which("java"):
-        return unavailable_result("madamira", "Optional MADAMIRA unavailable: Java executable is missing from PATH.", text)
-    home = _madamira_home()
-    if not home.exists():
-        return unavailable_result("madamira", f"Optional MADAMIRA unavailable: MADAMIRA_HOME not found at {home}.", text)
-    return unavailable_result("madamira", "MADAMIRA files detected, but adapter execution is not configured.", text)
+    tool = "madamira"
+    try:
+        if not madamira_available:
+            return {
+                "tool": tool,
+                "status": "unavailable",
+                "reason": "MADAMIRA not configured. Set MADAMIRA_HOME or place files in tools/madamira/",
+                "input": text,
+                "word_count": 0,
+                "tokens": [],
+            }
 
+        # Future: implement actual MADAMIRA client.
+        return {
+            "tool": tool,
+            "status": "unavailable",
+            "reason": "MADAMIRA adapter execution is not implemented in this deployment.",
+            "input": text,
+            "word_count": 0,
+            "tokens": [],
+        }
 
-class MADAMIRATool:
-    tool_name = "madamira"
+    except Exception as e:
+        return {
+            "tool": tool,
+            "status": "error",
+            "reason": str(e),
+            "input": text,
+            "word_count": 0,
+            "tokens": [],
+        }
 
-    def analyze(self, text: str) -> Dict[str, Any]:
-        return madamira_analyze(text)
-
-    def is_loaded(self) -> bool:
-        return shutil.which("java") is not None and _madamira_home().exists()
