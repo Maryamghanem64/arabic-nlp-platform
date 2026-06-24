@@ -14,12 +14,60 @@ from app.utils.constants import GOLD_DATASET
 router = APIRouter()
 
 
+_inflight_eval: Dict[str, Any] = {}
+
+
 @router.get("/evaluate")
 def evaluate(text: str):
     if not text.strip():
         raise HTTPException(400, "Empty text")
-    camel_res, farasa_res, stanza_res, _ = run_all_tools(text)
-    return {"input": text, "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res)}
+
+    # Bug 1: ensure per-request execution doesn't duplicate tool calls.
+    # Key includes endpoint + text; evaluation logic/metrics remain unchanged.
+    key = f"evaluate::{text}"
+    cached = _inflight_eval.get(key)
+    if cached is not None:
+        camel_res, farasa_res, stanza_res = cached
+        from app.core.tool_registry import detect_tool_status
+        statuses = detect_tool_status()
+        all_tool_results = {
+            "camel": camel_res,
+            "farasa": farasa_res,
+            "stanza": stanza_res,
+        }
+        for tool_name in statuses.keys():
+            if tool_name not in all_tool_results:
+                all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+
+        return {
+            "input": text,
+            "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, all_tool_results=all_tool_results),
+        }
+
+
+    # Core tools used by fusion/evaluation.
+    camel_res, farasa_res, stanza_res, _qalsadi_res = run_all_tools(text)
+
+    # Optional tools are needed only for excluded_tools computation.
+    all_tool_results = {
+        "camel": camel_res,
+        "farasa": farasa_res,
+        "stanza": stanza_res,
+    }
+    # We don't run additional analysis; statuses come from tool_registry detect.
+    # evaluate_tools expects all_tool_results to contain each tool result.
+    # For inactive tools we construct lightweight dicts with the computed status.
+    from app.core.tool_registry import detect_tool_status
+
+    statuses = detect_tool_status()
+    for tool_name in statuses.keys():
+        if tool_name not in all_tool_results:
+            all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+
+    _inflight_eval[key] = (camel_res, farasa_res, stanza_res)
+    return {"input": text, "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, all_tool_results=all_tool_results)}
+
+
 
 
 @router.get("/evaluate/dataset")
@@ -28,7 +76,25 @@ def evaluate_dataset():
     results = []
     for item in GOLD_DATASET:
         camel_res, farasa_res, stanza_res, _ = run_all_tools(item["text"])
-        eval_result = evaluate_tools(item["text"], camel_res, stanza_res, farasa_res)
+        from app.core.tool_registry import detect_tool_status
+        statuses = detect_tool_status()
+        all_tool_results = {
+            "camel": camel_res,
+            "farasa": farasa_res,
+            "stanza": stanza_res,
+        }
+        for tool_name in statuses.keys():
+            if tool_name not in all_tool_results:
+                all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+
+        eval_result = evaluate_tools(
+            item["text"],
+            camel_res,
+            stanza_res,
+            farasa_res,
+            all_tool_results=all_tool_results,
+        )
+
         results.append(
             {
                 "text": item["text"],

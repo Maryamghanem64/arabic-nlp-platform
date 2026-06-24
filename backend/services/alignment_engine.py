@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.utils.helpers import normalize_pos_for_compare
+
 
 @dataclass(frozen=True)
 class AlignedToken:
@@ -19,11 +21,9 @@ def _safe_str(x: Any) -> str:
 
 
 def _strip_diacritics_local(text: Optional[str]) -> str:
-    # Local fallback: avoid importing heavy utilities.
     if text is None:
         return ""
     import re
-
     return re.sub(r"[\u064B-\u065F\u0670]", "", str(text))
 
 
@@ -35,12 +35,8 @@ def _is_punct(surface: str) -> bool:
 
 
 def _tool_token_variants(tok: Dict[str, Any]) -> List[str]:
-    """Return possible surface variants for matching.
-
-    For Farasa: segmentation is list of parts; we may match base surface
-    against joined segmentation or a segment part.
-    """
     variants: List[str] = []
+
     surface = _norm_surface(tok.get("surface"))
     if surface:
         variants.append(surface)
@@ -60,43 +56,28 @@ def align_tools(
     base_tokens: List[Dict[str, Any]],
     tools_tokens: Dict[str, List[Dict[str, Any]]],
 ) -> Tuple[List[AlignedToken], Dict[str, Any]]:
-    """Align each base token with at most one token per tool.
 
-    Alignment strategy:
-    - Greedy forward match by surface.
-    - If punctuation: punctuation surfaces must match.
-    - If segmentation differs: base surface may match a Farasa segment
-      or joined segmentation.
-
-    Returns:
-      aligned: list length == len(base_tokens)
-      meta: debug information (kept small)
-    """
-
-    # Precompute tool variants for each token index.
     tool_variants: Dict[str, List[List[str]]] = {}
     tool_surfaces: Dict[str, List[str]] = {}
+
     for tool_name, toks in tools_tokens.items():
         tool_surfaces[tool_name] = [_norm_surface(t.get("surface")) for t in toks]
         tool_variants[tool_name] = [_tool_token_variants(t) for t in toks]
 
     aligned: List[AlignedToken] = []
-
-    # Greedy: maintain current pointer per tool.
-    pointers: Dict[str, int] = {tool: 0 for tool in tools_tokens.keys()}
-
-    matched_counts: Dict[str, int] = {tool: 0 for tool in tools_tokens.keys()}
+    pointers: Dict[str, int] = {tool: 0 for tool in tools_tokens}
+    matched_counts: Dict[str, int] = {tool: 0 for tool in tools_tokens}
 
     for base in base_tokens:
         base_surface = _norm_surface(base.get("surface"))
-
-        tools_map: Dict[str, Optional[Dict[str, Any]]] = {tool: None for tool in tools_tokens.keys()}
+        tools_map: Dict[str, Optional[Dict[str, Any]]] = {
+            tool: None for tool in tools_tokens
+        }
 
         for tool_name, toks in tools_tokens.items():
             start = pointers.get(tool_name, 0)
             found_idx: Optional[int] = None
 
-            # punctuation: strict
             if _is_punct(base_surface):
                 for j in range(start, len(toks)):
                     if _norm_surface(toks[j].get("surface")) == base_surface:
@@ -104,15 +85,31 @@ def align_tools(
                         break
             else:
                 for j in range(start, len(toks)):
-                    # direct surface
                     if _norm_surface(toks[j].get("surface")) == base_surface:
                         found_idx = j
                         break
-                    # segmentation/variant match
-                    if base_surface:
-                        if base_surface in tool_variants[tool_name][j]:
-                            found_idx = j
-                            break
+
+                    # Direct surface match failed. For MWT-like cases, allow:
+                    # 1) base_surface appears in any token variants produced by the tool
+                    # 2) tool surface equals the first part of base_surface (common when stanza splits MWT)
+                    if base_surface and base_surface in tool_variants[tool_name][j]:
+                        found_idx = j
+                        break
+
+                    if base_surface and toks[j].get("segmentation") and isinstance(toks[j].get("segmentation"), list):
+                        parts = [str(p) for p in toks[j].get("segmentation") if p]
+                        if parts:
+                            # If the tool broke base into parts, align using the first part as a key.
+                            if _norm_surface(parts[0]) == base_surface:
+                                found_idx = j
+                                break
+
+                    # If tool token surface is a suffix/prefix-part of base_surface, allow that as a key.
+                    tool_surf = _norm_surface(toks[j].get("surface"))
+                    if tool_surf and (tool_surf == base_surface or tool_surf in base_surface or base_surface in tool_surf):
+                        found_idx = j
+                        break
+
 
             if found_idx is not None:
                 pointers[tool_name] = found_idx + 1
@@ -121,7 +118,11 @@ def align_tools(
 
         aligned.append(AlignedToken(base=base, tools=tools_map))
 
-    meta = {"matched_counts": matched_counts, "base_count": len(base_tokens)}
+    meta = {
+        "matched_counts": matched_counts,
+        "base_count": len(base_tokens),
+    }
+
     return aligned, meta
 
 
@@ -129,14 +130,32 @@ def compute_agreements(
     *,
     aligned_tokens: List[AlignedToken],
 ) -> Dict[str, Any]:
-    """Compute pos/lemma/root/segmentation agreements using aligned normalized tokens."""
 
-    def eq(a: Optional[Any], b: Optional[Any]) -> bool:
-        if a is None or b is None:
-            return False
-        sa = _strip_diacritics_local(str(a))
-        sb = _strip_diacritics_local(str(b))
-        return sa == sb and sa != ""
+    def _extract_lemma(t: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not t:
+            return None
+        a = t.get("analyses")
+        if a and isinstance(a, list) and len(a) > 0:
+            first = a[0] if a else {}
+            if isinstance(first, dict):
+                return first.get("lemma")
+        return t.get("lemma")
+
+
+    def strip(a: Any) -> str:
+        return _strip_diacritics_local(str(a)) if a is not None else ""
+
+    def extract_pos(t: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not t:
+            return None
+
+        # camel / qalsadi style
+        if "analyses" in t and isinstance(t["analyses"], list):
+            first = t["analyses"][0] if t["analyses"] else {}
+            return first.get("pos") or first.get("upos")
+
+        # stanza style
+        return t.get("pos") or t.get("upos")
 
     pos_agree = 0
     lemma_agree = 0
@@ -152,38 +171,49 @@ def compute_agreements(
         qalsadi = atok.tools.get("qalsadi")
         farasa = atok.tools.get("farasa")
 
-        # Agreement is computed across tools that have value; for compact UI we
-        # use camel as reference when available, otherwise stanza/qalsadi.
         ref = camel or stanza or qalsadi
+        if not ref:
+            continue
 
-        if ref:
-            # POS agreement: all present must match reference
-            ref_pos = ref.get("pos")
-            tool_pos_vals = [
-                t.get("pos") for t in [camel, stanza, qalsadi] if t and t.get("pos")
-            ]
-            if tool_pos_vals and all(v == ref_pos for v in tool_pos_vals):
-                pos_agree += 1
+        ref_pos = normalize_pos_for_compare(extract_pos(ref))
 
-            # lemma/root
-            ref_lemma = ref.get("lemma")
-            lemma_vals = [t.get("lemma") for t in [camel, stanza, qalsadi] if t and t.get("lemma")]
-            if lemma_vals and all(eq(v, ref_lemma) for v in lemma_vals):
-                lemma_agree += 1
+        tool_pos_vals = [
+            normalize_pos_for_compare(extract_pos(t))
+            for t in (camel, stanza, qalsadi)
+            if t and extract_pos(t)
+        ]
 
-            ref_root = ref.get("root")
-            root_vals = [t.get("root") for t in [camel, stanza, qalsadi] if t and t.get("root")]
-            if root_vals and all(eq(v, ref_root) for v in root_vals):
-                root_agree += 1
+        if tool_pos_vals and all(v == ref_pos for v in tool_pos_vals):
+            pos_agree += 1
 
-        # segmentation agreement: farasa segments compared to base segmentation
+        ref_lemma = _extract_lemma(ref)
+        lemma_vals = [
+            _extract_lemma(t)
+            for t in (camel, stanza, qalsadi)
+            if _extract_lemma(t)
+        ]
+
+        if lemma_vals and ref_lemma and all(strip(v) == strip(ref_lemma) for v in lemma_vals):
+            lemma_agree += 1
+
+
+
+        ref_root = ref.get("root")
+
+        root_vals = [
+            t.get("root")
+            for t in (camel, stanza, qalsadi)
+            if t and t.get("root")
+        ]
+        if root_vals and ref_root and all(strip(v) == strip(ref_root) for v in root_vals):
+            root_agree += 1
+
         if farasa and isinstance(farasa.get("segmentation"), list):
-            seg = farasa.get("segmentation")
-            base_seg = atok.base.get("segmentation")
-            if isinstance(base_seg, list):
-                # Compare joined versions
-                if "".join([_safe_str(x) for x in seg]) == "".join([_safe_str(x) for x in base_seg]):
-                    seg_agree += 1
+            seg = farasa.get("segmentation") or []
+            base_seg = atok.base.get("segmentation") or []
+
+            if "".join(map(str, seg)) == "".join(map(str, base_seg)):
+                seg_agree += 1
 
     def pct(n: int) -> int:
         return int(round((n / total * 100) if total else 0))
@@ -195,4 +225,3 @@ def compute_agreements(
         "root_agreement": pct(root_agree),
         "segmentation_agreement": pct(seg_agree),
     }
-

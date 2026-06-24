@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from app.utils.helpers import classify_conflict, normalize_pos_for_compare, strip_diacritics
+from backend.services.alignment_engine import align_tools, compute_agreements
+
+
 
 
 def compute_prf(tp: int, fp: int, fn: int) -> Dict[str, float]:
@@ -12,52 +15,86 @@ def compute_prf(tp: int, fp: int, fn: int) -> Dict[str, float]:
     return {"precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3)}
 
 
-def evaluate_tools(text: str, camel_res, stanza_res, farasa_res):
-    """Evaluate CAMeL vs Stanza using surface-string alignment (not index).
+def evaluate_tools(
+    text: str,
+    camel_res,
+    stanza_res,
+    farasa_res,
+    all_tool_results: Dict[str, Dict] | None = None,
+):
+    """Evaluate CAMeL vs Stanza using surface-string alignment.
 
-    Index-based alignment results in systematic 0% scores when tools tokenize
-    into different token counts/order.
+    Also reports excluded_tools based on statuses of *all* tools.
     """
+    excluded = {"error", "unavailable", "future_work", "lazy"}
+
+    # Metrics active set stays the same (camel/farasa/stanza only).
+    tool_statuses = {
+        "camel": camel_res.get("status") if isinstance(camel_res, dict) else None,
+        "stanza": stanza_res.get("status") if isinstance(stanza_res, dict) else None,
+        "farasa": farasa_res.get("status") if isinstance(farasa_res, dict) else None,
+    }
+    active_tools = [t for t, s in tool_statuses.items() if s not in excluded]
+    active_tool_count = len(active_tools)
+
+    # excluded_tools should include all optional tools too.
+    if all_tool_results is None:
+        all_tool_results = {}
+
+    all_statuses: Dict[str, str | None] = {}
+    for name in all_tool_results.keys():
+        res = all_tool_results.get(name)
+        if isinstance(res, dict):
+            all_statuses[name] = res.get("status")
+        else:
+            all_statuses[name] = None
+
+    # Ensure core tools are also represented even if caller didn't pass them.
+    all_statuses.setdefault("camel", tool_statuses.get("camel"))
+    all_statuses.setdefault("farasa", tool_statuses.get("farasa"))
+    all_statuses.setdefault("stanza", tool_statuses.get("stanza"))
+
+    excluded_tools = [t for t, s in all_statuses.items() if s in excluded]
+
+    # Evaluate CAMeL vs Stanza using surface-string alignment (not index).
+
 
     farasa_tokens = farasa_res.get("tokens", []) or []
     camel_tokens = camel_res.get("tokens", []) or []
     stanza_tokens = stanza_res.get("tokens", []) or []
 
-    # Use Farasa surfaces as the UI token anchor
-    words = [t.get("surface") for t in farasa_tokens if isinstance(t, dict) and t.get("surface")]
-    total = len(words)
+    farasa_tokens_filtered = [
+        t
+        for t in farasa_tokens
+        if isinstance(t, dict) and t.get("surface")
+    ]
 
-    # Build surface -> first token maps
-    camel_map = {}
-    for t in camel_tokens:
-        if not isinstance(t, dict):
-            continue
-        s = t.get("surface")
-        if s and s not in camel_map:
-            camel_map[s] = t
+    total = len([t.get("surface") for t in farasa_tokens_filtered if t.get("surface")])
 
-    stanza_map = {}
-    for t in stanza_tokens:
-        if not isinstance(t, dict):
-            continue
-        s = t.get("surface")
-        if s and s not in stanza_map:
-            stanza_map[s] = t
+    aligned_tokens, _meta = align_tools(
+        base_tokens=farasa_tokens_filtered,
+        tools_tokens={"camel": camel_tokens, "stanza": stanza_tokens},
+    )
 
-    pos_tp = pos_fp = pos_fn = 0
-    lemma_match = 0
-    seg_coverage = 0
+    agreements = compute_agreements(aligned_tokens=aligned_tokens)
+
+    pos_agreement = (agreements.get("pos_agreement", 0) / 100) if total else 0
+    lemma_match = (agreements.get("lemma_agreement", 0) / 100) if total else 0
+
+    pos_precision = pos_recall = pos_f1 = round(pos_agreement, 3)
+
+    seg_cov = 0
+    for atok in aligned_tokens:
+        base_seg = atok.base.get("segmentation")
+        if isinstance(base_seg, list) and base_seg:
+            seg_cov += 1
+
     conflicts = []
     all_conflicts = []
 
-    for w in words:
-        camel_tok = camel_map.get(w)
-        stanza_tok = stanza_map.get(w)
-
-        # segmentation coverage
-        f_tok = next((t for t in farasa_tokens if isinstance(t, dict) and t.get("surface") == w), None)
-        if f_tok and f_tok.get("segmentation"):
-            seg_coverage += 1
+    for atok in aligned_tokens:
+        camel_tok = atok.tools.get("camel")
+        stanza_tok = atok.tools.get("stanza")
 
         camel_ana = None
         if camel_tok and isinstance(camel_tok, dict):
@@ -65,42 +102,53 @@ def evaluate_tools(text: str, camel_res, stanza_res, farasa_res):
             if analyses and isinstance(analyses[0], dict):
                 camel_ana = analyses[0]
 
+        w = atok.base.get("surface")
+
         if camel_ana and stanza_tok:
             camel_pos = normalize_pos_for_compare(camel_ana.get("pos"))
             stanza_pos = str(stanza_tok.get("upos", "")).upper() if stanza_tok.get("upos") else ""
 
-            if camel_pos and stanza_pos:
-                if camel_pos == stanza_pos:
-                    pos_tp += 1
-                else:
-                    pos_fp += 1
-                    pos_fn += 1
-                    conflicts.append({"word": w, "camel_pos": camel_pos, "stanza_pos": stanza_pos})
-                    all_conflicts.append(classify_conflict("pos", camel_pos, stanza_pos))
+            if camel_pos and stanza_pos and camel_pos != stanza_pos:
+                conflicts.append({"word": w, "camel_pos": camel_pos, "stanza_pos": stanza_pos})
+                all_conflicts.append(classify_conflict("pos", camel_pos, stanza_pos))
 
             c_lemma = strip_diacritics(camel_ana.get("lemma"))
             s_lemma = strip_diacritics(stanza_tok.get("lemma"))
-            if c_lemma and s_lemma:
-                if c_lemma == s_lemma:
-                    lemma_match += 1
-                else:
-                    all_conflicts.append(classify_conflict("lemma", c_lemma, s_lemma))
+            if c_lemma and s_lemma and c_lemma != s_lemma:
+                all_conflicts.append(classify_conflict("lemma", c_lemma, s_lemma))
 
-    pos_agreement = pos_tp / total if total else 0
-    pos_prf = compute_prf(pos_tp, pos_fp, pos_fn)
-
-    return {
+    result = {
         "total_words": total,
         "pos_agreement": round(pos_agreement, 2),
         "pos_agreement_pct": f"{round(pos_agreement * 100, 1)}%",
-        "pos_precision": pos_prf["precision"],
-        "pos_recall": pos_prf["recall"],
-        "pos_f1": pos_prf["f1"],
-        "lemma_match": round(lemma_match / total, 2) if total else 0,
-        "lemma_match_pct": f"{round(lemma_match / total * 100, 1)}%" if total else "0%",
-        "segmentation_coverage": round(seg_coverage / total, 2) if total else 0,
+        "pos_precision": pos_precision,
+        "pos_recall": pos_recall,
+        "pos_f1": pos_f1,
+        "lemma_match": round(lemma_match, 2) if total else 0,
+        "lemma_match_pct": f"{round(lemma_match * 100, 1)}%" if total else "0%",
+        "segmentation_coverage": round(seg_cov / total, 2) if total else 0,
         "pos_conflicts": conflicts,
         "all_conflicts": all_conflicts,
+        "active_tools": sorted(active_tools),
+        "excluded_tools": sorted(excluded_tools),
+        "metrics_note": f"Scores reflect {active_tool_count} active tools only",
     }
+
+    # If all tools are inactive, ensure metrics reflect 0 active participation.
+    if active_tool_count == 0:
+        result["total_words"] = 0
+        result["pos_agreement"] = 0
+        result["pos_agreement_pct"] = "0%"
+        result["pos_precision"] = 0
+        result["pos_recall"] = 0
+        result["pos_f1"] = 0
+        result["lemma_match"] = 0
+        result["lemma_match_pct"] = "0%"
+        result["segmentation_coverage"] = 0
+        result["pos_conflicts"] = []
+        result["all_conflicts"] = []
+
+    return result
+
 
 

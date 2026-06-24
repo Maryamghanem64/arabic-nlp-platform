@@ -9,13 +9,9 @@ from app.utils.logger import logger
 from backend.config.tool_paths import UDPipePaths
 
 
-
 udpipe_model = None
 udpipe_pipeline_obj = None
 udpipe_lock = threading.Lock()
-
-
-
 
 _udp_paths = UDPipePaths()
 
@@ -25,28 +21,30 @@ def _resolve_model_path() -> Optional[Path]:
     return _udp_paths.resolved_existing()
 
 
-
 def load_udpipe() -> None:
+    """Load UDPipe model + build a robust pipeline."""
+
     global udpipe_model, udpipe_pipeline_obj
     if udpipe_pipeline_obj is not None:
         return
 
     model_path = _resolve_model_path()
     if model_path is None:
-        logger.warning("⚠️ UDPipe model not found")
+        logger.warning(
+            "⚠️ UDPipe model not found (UDPipePaths.resolved_existing() returned None)"
+        )
         return
 
     try:
+        import ufal.udpipe  # noqa: F401
         from ufal.udpipe import Model, Pipeline
 
         udpipe_model = Model.load(str(model_path))
-        udpipe_pipeline_obj = Pipeline(
-            udpipe_model,
-            "tokenize",
-            Pipeline.DEFAULT,
-            Pipeline.DEFAULT,
-            "conllu",
-        )
+
+        # Safer pipeline construction across UDPipe bindings:
+        # tokenize + tag + parse.
+        udpipe_pipeline_obj = Pipeline(udpipe_model, "tokenize", "tag", "parse")
+
         logger.info(f"✅ UDPipe loaded: {model_path}")
     except Exception as e:
         udpipe_model = None
@@ -55,6 +53,11 @@ def load_udpipe() -> None:
 
 
 def _parse_conllu(conllu_text: str) -> List[Dict[str, Any]]:
+    """Parse UDPipe-produced CoNLL-U text into token dicts.
+
+    Kept for compatibility if the UDPipe binding returns CoNLL-U text.
+    """
+
     tokens: List[Dict[str, Any]] = []
     for line in (conllu_text or "").split("\n"):
         line = line.strip()
@@ -66,28 +69,18 @@ def _parse_conllu(conllu_text: str) -> List[Dict[str, Any]]:
         if "-" in parts[0] or "." in parts[0]:
             continue
 
-        upos = parts[3] if parts[3] != "_" else None
+        surface = parts[1] if parts[1] != "_" else None
         lemma = parts[2] if parts[2] != "_" else None
-        feats = parts[5] if parts[5] != "_" else None
+        upos = parts[3] if parts[3] != "_" else None
 
-        root = None
-        # Best-effort root extraction from feats (not guaranteed).
-        if feats and isinstance(feats, str):
-            # try common fields
-            for key in ["Root", "root", "LEMMA", "OrigLemma"]:
-                if f"{key}=" in feats:
-                    for kv in feats.split("|"):
-                        if kv.startswith(key + "="):
-                            root = kv.split("=", 1)[1] or None
+        if not surface:
+            continue
 
-        surface = parts[1]
         tokens.append(
             {
                 "surface": surface,
                 "lemma": lemma,
                 "pos": upos,
-                "root": root,
-                "gloss": None,
             }
         )
 
@@ -96,6 +89,7 @@ def _parse_conllu(conllu_text: str) -> List[Dict[str, Any]]:
 
 def udpipe_analyze(text: str) -> Dict[str, Any]:
     tool = "udpipe"
+
     try:
         global udpipe_pipeline_obj
 
@@ -106,7 +100,6 @@ def udpipe_analyze(text: str) -> Dict[str, Any]:
 
         if udpipe_pipeline_obj is None:
             load_udpipe()
-
 
         if udpipe_pipeline_obj is None:
             return {
@@ -120,14 +113,32 @@ def udpipe_analyze(text: str) -> Dict[str, Any]:
 
         sentence = text or ""
 
-        with udpipe_lock:
-            conllu = udpipe_pipeline_obj.process(sentence)
-            conllu_text = conllu if isinstance(conllu, str) else str(conllu)
+        tokens: List[Dict[str, Any]] = []
 
-        tokens = _parse_conllu(conllu_text)
+        with udpipe_lock:
+            processed = udpipe_pipeline_obj.process(sentence)
+
+        # Preferred path: iterate token objects (binding-specific)
+        try:
+            # processed may be an iterable of Sentence objects
+            for s in processed:
+                for i in range(s.length()):
+                    t = s[i]
+                    tok = getattr(t, "form", None)
+                    lemma = getattr(t, "lemma", None)
+                    pos = getattr(t, "upos", None)
+                    if tok:
+                        tokens.append(
+                            {"surface": str(tok), "lemma": None if lemma is None else str(lemma), "pos": None if pos is None else str(pos)}
+                        )
+        except Exception:
+            # Fallback: treat as CoNLL-U text
+            conllu_text = processed if isinstance(processed, str) else str(processed)
+            tokens = _parse_conllu(conllu_text)
+
         return {
             "tool": tool,
-            "status": "ok" if tokens is not None else "error",
+            "status": "ok" if tokens else "error",
             "reason": "" if tokens else "UDPipe output produced no tokens",
             "input": text,
             "word_count": len(tokens),

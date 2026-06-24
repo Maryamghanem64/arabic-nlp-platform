@@ -7,6 +7,7 @@ from app.core.tool_registry import unavailable_result
 from app.tools.base_tool import BaseTool
 from app.utils.constants import ASPECT_MAP, GENDER_MAP, NUMBER_MAP
 from app.utils.helpers import augment_root, clean_root, confidence_bucket, correct_number, map_pos, simplify_gloss
+from app.tools.camel_root_patch import patch_camel_root
 from app.utils.logger import logger, log_time
 
 
@@ -82,10 +83,17 @@ def camel_analyze(text: str) -> Dict[str, Any]:
                 features = item.analysis
                 score = round(float(item.score), 4)
                 raw_root = clean_root(features.get("root"))
+                # Repair 3: hamza must NOT be stripped before root classification
+                patched_root, patched_type = patch_camel_root(raw_root or "")
+                raw_root = patched_root
+                # Override root_type to match patched classification
+                root_type = patched_type
                 raw_pos = features.get("pos")
                 raw_lemma = features.get("lex")
                 raw_gloss = features.get("gloss")
-                aug_root, root_type, part_gloss = augment_root(raw_root or "", raw_lemma or "", raw_pos or "", token)
+                aug_root, root_type2, part_gloss = augment_root(raw_root or "", raw_lemma or "", raw_pos or "", token)
+                # Repair 3: keep patched root_type instead of augment_root's type
+                root_type = patched_type
                 clean_gloss = part_gloss or simplify_gloss(raw_gloss)
                 corrected_num, num_fixed = correct_number(token, NUMBER_MAP.get(features.get("num")), segs, map_pos(raw_pos))
                 corrections: List[str] = []

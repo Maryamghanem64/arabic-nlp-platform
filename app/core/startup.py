@@ -66,9 +66,52 @@ def run_all_registered_tools(text: str) -> Dict[str, Dict[str, Any]]:
     return {tool: results[tool] for tool in ALL_TOOLS}
 
 
+import threading
+
+
+_inflight_run_lock = threading.Lock()
+_inflight_run_map: dict[str, threading.Event] = {}
+_inflight_run_results: dict[str, tuple] = {}
+
+
 def run_all_tools(text: str):
-    results = run_core_tools(text)
-    return results["camel"], results["farasa"], results["stanza"], results["qalsadi"]
+    """Run the 4 core tools used by fusion/evaluation (race-condition safe).
+
+    Singleflight-style dedupe per unique text across concurrent requests.
+    """
+    key = f"run_all_tools::{text}"
+
+    first: bool = False
+    with _inflight_run_lock:
+        ev = _inflight_run_map.get(key)
+        if ev is None:
+            ev = threading.Event()
+            _inflight_run_map[key] = ev
+            first = True
+
+    if not first:
+        # Wait for the in-flight computation to finish.
+        _inflight_run_map[key].wait()
+        with _inflight_run_lock:
+            cached = _inflight_run_results.get(key)
+        # cached is expected to exist when the event is set.
+        return cached[0], cached[1], cached[2], cached[3]
+
+    try:
+        results = run_core_tools(text)
+        packed = (results["camel"], results["farasa"], results["stanza"], results["qalsadi"])
+        with _inflight_run_lock:
+            _inflight_run_results[key] = packed
+        return packed[0], packed[1], packed[2], packed[3]
+    finally:
+        with _inflight_run_lock:
+            ev_to_set = _inflight_run_map.get(key)
+            _inflight_run_map.pop(key, None)
+            _inflight_run_results.pop(key, None)
+            if ev_to_set:
+                ev_to_set.set()
+
+
 
 
 def get_tool_statuses() -> Dict[str, Dict[str, Any]]:

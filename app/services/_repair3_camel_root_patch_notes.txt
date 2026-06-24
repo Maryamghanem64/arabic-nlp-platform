@@ -1,0 +1,6 @@
+CAMeL root extraction patch notes (Repair 3)
+- Apply hamza-preserving normalization before root split/classification
+- Count actual Arabic letters after normalization
+- Determine root_type based on dot-separated root parts and letter count
+- Ensure قرأ -> root 'ق.ر.أ' and root_type 'triliteral'
+

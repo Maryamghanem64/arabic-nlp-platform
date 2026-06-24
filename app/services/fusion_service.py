@@ -20,6 +20,7 @@ def score_pos(camel_pos_raw, stanza_pos_raw) -> tuple:
         return camel_pos, "agreement", 4, notes
 
     if camel_pos and stanza_pos:
+
         notes.append(f"POS conflict: camel={camel_pos} stanza={stanza_pos}")
 
         camel_score = FUSION_WEIGHTS["pos"].get("camel", 0)
@@ -40,6 +41,7 @@ def score_pos(camel_pos_raw, stanza_pos_raw) -> tuple:
     if stanza_pos:
         return stanza_pos, "stanza_only", 1, notes
     return None, "none", 0, notes
+
 
 
 def fuse_confidence(camel_score: float, pos_source: str) -> tuple:
@@ -91,8 +93,16 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None):
 
     final_pos, pos_source, _, pos_notes = score_pos(camel_pos_raw, stanza_pos_raw)
     fused["final"]["pos"] = final_pos
-    fused["sources"]["pos"] = pos_source
+
+    # Provenance attribution for POS must reflect the actual provider of the selected value.
+    # "agreement" is a fusion label, not a real tool.
+    if pos_source == "agreement":
+        fused["sources"]["pos"] = "camel" if camel_pos_raw else "stanza"
+    else:
+        fused["sources"]["pos"] = pos_source
+
     fused["notes"].extend(pos_notes)
+
 
     if pos_notes:
         fused["conflicts"].append(classify_conflict("pos", camel_pos_raw, stanza_pos_raw))
@@ -125,31 +135,27 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None):
 
 
 def fusion_system(text, camel_res, stanza_res, farasa_res):
+    from backend.services.alignment_engine import align_tools
+
     farasa_tokens = farasa_res.get("tokens", [])
     camel_tokens = camel_res.get("tokens", [])
     stanza_tokens = stanza_res.get("tokens", [])
 
+    aligned_tokens, _meta = align_tools(
+        base_tokens=farasa_tokens,
+        tools_tokens={"camel": camel_tokens, "stanza": stanza_tokens},
+    )
+
     fused_output = []
-    stanza_index = 0
 
-    for i, farasa_tok in enumerate(farasa_tokens):
-        word = farasa_tok["surface"]
-        camel_tok = camel_tokens[i] if i < len(camel_tokens) else None
+    for atok in aligned_tokens:
+        word = atok.base["surface"]
+        camel_tok = atok.tools.get("camel")
+        stanza_tok = atok.tools.get("stanza")
+        farasa_tok = atok.base
 
-        collected = []
-        while stanza_index < len(stanza_tokens):
-            collected.append(stanza_tokens[stanza_index])
-            stanza_index += 1
-            if "".join([t["surface"] for t in collected]).replace(" ", "") == word:
-                break
-
-        merged_stanza = None
-        if collected:
-            main = collected[-1].copy()
-            main["merged_tokens"] = [t["surface"] for t in collected]
-            merged_stanza = main
-
-        fused_output.append(fuse_token(word, camel_tok, merged_stanza, farasa_tok))
+        fused_output.append(fuse_token(word, camel_tok, stanza_tok, farasa_tok))
 
     return {"text": text, "fusion": fused_output}
+
 
