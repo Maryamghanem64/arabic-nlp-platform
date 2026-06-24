@@ -13,6 +13,6 @@ def fusion_endpoint(text: str):
     if not text.strip():
         raise HTTPException(400, "Empty text")
     camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-    fused = fusion_system(text, camel_res, stanza_res, farasa_res)
+    fused = fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res)
     return {"input": text, "qalsadi": qalsadi_res, "fusion_result": fused}
 

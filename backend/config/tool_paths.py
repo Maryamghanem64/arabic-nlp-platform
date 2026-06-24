@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +54,7 @@ class AlKhalilPaths:
 @dataclass(frozen=True)
 class UDPipePaths:
     model_filename: str = "ar-ud-udpipe.udpipe"
-    rel_default_model_path: Path = Path("app") / "tools" / "udpipe" / "ar-ud-ud-udpipe.udpipe"
+    rel_default_model_path: Path = Path("app") / "tools" / "udpipe" / "models" / "arabic.udpipe"
     legacy_rel_default_model_paths: tuple[Path, ...] = (
         Path("tools") / "udpipe" / "ar-ud-udpipe.udpipe",
     )
@@ -61,19 +62,36 @@ class UDPipePaths:
     def resolve(self) -> Path:
         project_root = Path(__file__).resolve().parents[2]
 
-        configured = os.environ.get("UDPIP_MODEL")
+        configured = os.environ.get("UDPIPE_MODEL") or os.environ.get("UDPIP_MODEL")
         if configured:
-            return Path(configured)
+            return Path(configured).expanduser()
 
         return project_root / self.rel_default_model_path
 
     def resolved_existing(self) -> Optional[Path]:
         project_root = Path(__file__).resolve().parents[2]
 
-        configured = os.environ.get("UDPIP_MODEL")
+        configured = os.environ.get("UDPIPE_MODEL") or os.environ.get("UDPIP_MODEL")
         if configured:
-            p = Path(configured)
-            return p if p.exists() and p.is_file() else None
+            p = Path(configured).expanduser()
+            if p.exists() and p.is_file():
+                return p
+
+        search_patterns = [
+            project_root / "app" / "tools" / "udpipe" / "arabic*.udpipe",
+            project_root / "app" / "tools" / "udpipe" / "models" / "arabic*.udpipe",
+            project_root / "app" / "tools" / "udpipe" / "*.udpipe",
+        ]
+
+        for pattern in search_patterns:
+            for candidate in sorted(Path(match) for match in glob.glob(str(pattern))):
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+
+        desktop_pattern = "C:/Users/*/Desktop/*/tools/udpipe/*.udpipe"
+        for candidate in sorted(Path(match) for match in glob.glob(desktop_pattern)):
+            if candidate.exists() and candidate.is_file():
+                return candidate
 
         default = project_root / self.rel_default_model_path
         if default.exists() and default.is_file():

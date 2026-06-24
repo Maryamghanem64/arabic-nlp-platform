@@ -112,6 +112,8 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
     from backend.config.tool_paths import AlKhalilPaths
 
     jar_resolver = AlKhalilPaths()
+    from app.tools.farasa_tool import get_farasa_status
+    from app.tools.udpipe_tool import get_udpipe_status
 
     java = java_status()
 
@@ -123,18 +125,15 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
         else {"status": "missing_dependency", "reason": "Install camel-tools."}
     )
 
-    if has_module("farasa"):
-        statuses["farasa"] = (
-            {"status": "ok", "reason": "farasapy package and Farasa binaries detected."}
-            if java["status"] == "ok" and farasa_bins_present()
-            else {
-                "status": "missing_model" if java["status"] == "ok" else "missing_java",
-                "reason": "Farasa requires Java and local Farasa JAR files.",
-                "java": java,
-            }
-        )
-    else:
-        statuses["farasa"] = {"status": "missing_dependency", "reason": "Install farasapy or local Farasa package."}
+    farasa_status = get_farasa_status()
+    if java["status"] != "ok" and farasa_status.get("status") == "ok":
+        farasa_status = {
+            "status": "missing_java",
+            "reason": "Farasa requires Java.",
+            "java": java,
+            **{k: v for k, v in farasa_status.items() if k not in {"status", "reason"}},
+        }
+    statuses["farasa"] = farasa_status
 
     if has_module("stanza"):
         statuses["stanza"] = (
@@ -193,11 +192,7 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
             "jar_exists": bool(alkhalil_file_exists),
         }
 
-    statuses["udpipe"] = (
-        {"status": "ok", "reason": "ufal.udpipe package detected."}
-        if has_module("ufal.udpipe") or has_module("ufal")
-        else {"status": "missing_dependency", "reason": "Optional UDPipe requires ufal.udpipe and Arabic model files."}
-    )
+    statuses["udpipe"] = get_udpipe_status()
 
     # MADAMIRA is optional: only mark as ok if it's configured + present; otherwise disabled.
     if java["status"] != "ok":

@@ -69,47 +69,72 @@ def run_all_registered_tools(text: str) -> Dict[str, Dict[str, Any]]:
 import threading
 
 
+# Singleflight implementation for run_all_tools(text)
+# Ensures:
+# - Exactly one leader executes run_core_tools() per unique text
+# - Followers wait without busy-waiting
+# - Followers get the exact same result object
+# - Exceptions propagate to all waiters
+
 _inflight_run_lock = threading.Lock()
-_inflight_run_map: dict[str, threading.Event] = {}
-_inflight_run_results: dict[str, tuple] = {}
+_inflight_run_state: dict[str, "_SingleflightState"] = {}
+
+
+class _SingleflightState:
+    __slots__ = ("event", "result", "exc")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.result = None
+        self.exc = None
 
 
 def run_all_tools(text: str):
-    """Run the 4 core tools used by fusion/evaluation (race-condition safe).
+    """Run core tools (camel, farasa, stanza, qalsadi) with singleflight dedupe.
 
-    Singleflight-style dedupe per unique text across concurrent requests.
+    Thread-safe across concurrent FastAPI requests.
     """
     key = f"run_all_tools::{text}"
 
-    first: bool = False
     with _inflight_run_lock:
-        ev = _inflight_run_map.get(key)
-        if ev is None:
-            ev = threading.Event()
-            _inflight_run_map[key] = ev
-            first = True
+        state = _inflight_run_state.get(key)
+        if state is None:
+            state = _SingleflightState()
+            _inflight_run_state[key] = state
+            leader = True
+        else:
+            leader = False
 
-    if not first:
-        # Wait for the in-flight computation to finish.
-        _inflight_run_map[key].wait()
-        with _inflight_run_lock:
-            cached = _inflight_run_results.get(key)
-        # cached is expected to exist when the event is set.
-        return cached[0], cached[1], cached[2], cached[3]
+    if not leader:
+        state.event.wait()
+        if state.exc is not None:
+            raise state.exc
+        packed = state.result
+        # packed is a tuple(camel, farasa, stanza, qalsadi)
+        return packed[0], packed[1], packed[2], packed[3]
 
     try:
         results = run_core_tools(text)
-        packed = (results["camel"], results["farasa"], results["stanza"], results["qalsadi"])
-        with _inflight_run_lock:
-            _inflight_run_results[key] = packed
-        return packed[0], packed[1], packed[2], packed[3]
+        state.result = (
+            results["camel"],
+            results["farasa"],
+            results["stanza"],
+            results["qalsadi"],
+        )
+        return state.result[0], state.result[1], state.result[2], state.result[3]
+    except BaseException as e:
+        state.exc = e
+        raise
     finally:
+        # Set event only after result/exception is stored.
+        state.event.set()
+        # Cleanup AFTER all followers can safely read state.result/state.exc.
+        # The state remains accessible to followers even after set(), because we wait on event.
+        # Remove from map after releasing leader lock section to minimize contention.
         with _inflight_run_lock:
-            ev_to_set = _inflight_run_map.get(key)
-            _inflight_run_map.pop(key, None)
-            _inflight_run_results.pop(key, None)
-            if ev_to_set:
-                ev_to_set.set()
+            # Another follower may already have captured `state` reference; it still points to the state object.
+            _inflight_run_state.pop(key, None)
+
 
 
 

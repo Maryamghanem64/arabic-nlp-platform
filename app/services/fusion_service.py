@@ -51,7 +51,7 @@ def fuse_confidence(camel_score: float, pos_source: str) -> tuple:
     return final, confidence_bucket(final)
 
 
-def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None):
+def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_tok=None):
     fused: Dict[str, Any] = {
         "word": word,
         "final": {},
@@ -72,12 +72,19 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None):
 
     camel_analyses = camel_tok.get("analyses", []) if camel_tok else []
 
-    if camel_analyses:
-        fused["final"]["lemma"] = camel_analyses[0].get("lemma")
+    camel_lemma = camel_analyses[0].get("lemma") if camel_analyses else None
+    stanza_lemma = stanza_tok.get("lemma") if stanza_tok else None
+    qalsadi_lemma = qalsadi_tok.get("lemma") if qalsadi_tok else None
+
+    if camel_lemma:
+        fused["final"]["lemma"] = camel_lemma
         fused["sources"]["lemma"] = "camel"
-    elif stanza_tok:
-        fused["final"]["lemma"] = stanza_tok.get("lemma")
+    elif stanza_lemma:
+        fused["final"]["lemma"] = stanza_lemma
         fused["sources"]["lemma"] = "stanza"
+    elif qalsadi_lemma:
+        fused["final"]["lemma"] = qalsadi_lemma
+        fused["sources"]["lemma"] = "qalsadi"
 
     if camel_analyses:
         fused["final"]["root"] = camel_analyses[0].get("root")
@@ -134,16 +141,17 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None):
     return fused
 
 
-def fusion_system(text, camel_res, stanza_res, farasa_res):
+def fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res=None):
     from backend.services.alignment_engine import align_tools
 
     farasa_tokens = farasa_res.get("tokens", [])
     camel_tokens = camel_res.get("tokens", [])
     stanza_tokens = stanza_res.get("tokens", [])
+    qalsadi_tokens = (qalsadi_res or {}).get("tokens", [])
 
     aligned_tokens, _meta = align_tools(
         base_tokens=farasa_tokens,
-        tools_tokens={"camel": camel_tokens, "stanza": stanza_tokens},
+        tools_tokens={"camel": camel_tokens, "stanza": stanza_tokens, "qalsadi": qalsadi_tokens},
     )
 
     fused_output = []
@@ -152,9 +160,10 @@ def fusion_system(text, camel_res, stanza_res, farasa_res):
         word = atok.base["surface"]
         camel_tok = atok.tools.get("camel")
         stanza_tok = atok.tools.get("stanza")
+        qalsadi_tok = atok.tools.get("qalsadi")
         farasa_tok = atok.base
 
-        fused_output.append(fuse_token(word, camel_tok, stanza_tok, farasa_tok))
+        fused_output.append(fuse_token(word, camel_tok, stanza_tok, farasa_tok, qalsadi_tok))
 
     return {"text": text, "fusion": fused_output}
 

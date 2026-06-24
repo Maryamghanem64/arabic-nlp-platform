@@ -20,41 +20,42 @@ def evaluate_tools(
     camel_res,
     stanza_res,
     farasa_res,
+    qalsadi_res=None,
     all_tool_results: Dict[str, Dict] | None = None,
 ):
     """Evaluate CAMeL vs Stanza using surface-string alignment.
 
     Also reports excluded_tools based on statuses of *all* tools.
     """
-    excluded = {"error", "unavailable", "future_work", "lazy"}
+    excluded = {"error", "unavailable", "future_work", "lazy", "disabled"}
+    metric_tools = ("camel", "farasa", "stanza", "qalsadi", "udpipe")
 
-    # Metrics active set stays the same (camel/farasa/stanza only).
-    tool_statuses = {
-        "camel": camel_res.get("status") if isinstance(camel_res, dict) else None,
-        "stanza": stanza_res.get("status") if isinstance(stanza_res, dict) else None,
-        "farasa": farasa_res.get("status") if isinstance(farasa_res, dict) else None,
-    }
-    active_tools = [t for t, s in tool_statuses.items() if s not in excluded]
-    active_tool_count = len(active_tools)
-
-    # excluded_tools should include all optional tools too.
     if all_tool_results is None:
         all_tool_results = {}
 
     all_statuses: Dict[str, str | None] = {}
-    for name in all_tool_results.keys():
-        res = all_tool_results.get(name)
+    for name, res in all_tool_results.items():
         if isinstance(res, dict):
             all_statuses[name] = res.get("status")
         else:
             all_statuses[name] = None
 
     # Ensure core tools are also represented even if caller didn't pass them.
-    all_statuses.setdefault("camel", tool_statuses.get("camel"))
-    all_statuses.setdefault("farasa", tool_statuses.get("farasa"))
-    all_statuses.setdefault("stanza", tool_statuses.get("stanza"))
+    all_statuses.setdefault("camel", camel_res.get("status") if isinstance(camel_res, dict) else None)
+    all_statuses.setdefault("farasa", farasa_res.get("status") if isinstance(farasa_res, dict) else None)
+    all_statuses.setdefault("stanza", stanza_res.get("status") if isinstance(stanza_res, dict) else None)
+    all_statuses.setdefault("qalsadi", qalsadi_res.get("status") if isinstance(qalsadi_res, dict) else None)
 
-    excluded_tools = [t for t, s in all_statuses.items() if s in excluded]
+    active_tools = [t for t in metric_tools if all_statuses.get(t) == "ok"]
+    active_tool_count = len(active_tools)
+    excluded_tools = sorted(
+        {
+            t
+            for t, s in all_statuses.items()
+            if t not in active_tools or s in excluded or t not in metric_tools
+        }
+    )
+
 
     # Evaluate CAMeL vs Stanza using surface-string alignment (not index).
 
@@ -129,7 +130,7 @@ def evaluate_tools(
         "segmentation_coverage": round(seg_cov / total, 2) if total else 0,
         "pos_conflicts": conflicts,
         "all_conflicts": all_conflicts,
-        "active_tools": sorted(active_tools),
+        "active_tools": active_tools,
         "excluded_tools": sorted(excluded_tools),
         "metrics_note": f"Scores reflect {active_tool_count} active tools only",
     }

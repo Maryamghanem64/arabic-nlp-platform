@@ -41,19 +41,21 @@ def evaluate(text: str):
 
         return {
             "input": text,
-            "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, all_tool_results=all_tool_results),
+            "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, qalsadi_res=all_tool_results.get("qalsadi"), all_tool_results=all_tool_results),
         }
 
 
     # Core tools used by fusion/evaluation.
-    camel_res, farasa_res, stanza_res, _qalsadi_res = run_all_tools(text)
+    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
 
-    # Optional tools are needed only for excluded_tools computation.
+    # Tool participation for metrics/excluded_tools must include qalsadi.
     all_tool_results = {
         "camel": camel_res,
         "farasa": farasa_res,
         "stanza": stanza_res,
+        "qalsadi": qalsadi_res,
     }
+
     # We don't run additional analysis; statuses come from tool_registry detect.
     # evaluate_tools expects all_tool_results to contain each tool result.
     # For inactive tools we construct lightweight dicts with the computed status.
@@ -65,7 +67,17 @@ def evaluate(text: str):
             all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
 
     _inflight_eval[key] = (camel_res, farasa_res, stanza_res)
-    return {"input": text, "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, all_tool_results=all_tool_results)}
+    return {
+        "input": text,
+        "evaluation": evaluate_tools(
+            text,
+            camel_res,
+            stanza_res,
+            farasa_res,
+            qalsadi_res=all_tool_results.get("qalsadi"),
+            all_tool_results=all_tool_results,
+        ),
+    }
 
 
 
@@ -92,6 +104,7 @@ def evaluate_dataset():
             camel_res,
             stanza_res,
             farasa_res,
+            qalsadi_res=all_tool_results.get("qalsadi"),
             all_tool_results=all_tool_results,
         )
 
@@ -121,8 +134,21 @@ def export_results(text: str, format: str = Query("json", description="json or c
         raise HTTPException(400, "Empty text")
 
     camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-    fused = fusion_system(text, camel_res, stanza_res, farasa_res)
-    evaln = evaluate_tools(text, camel_res, stanza_res, farasa_res)
+    fused = fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res)
+    all_tool_results = {
+        "camel": camel_res,
+        "farasa": farasa_res,
+        "stanza": stanza_res,
+        "qalsadi": qalsadi_res,
+    }
+    from app.core.tool_registry import detect_tool_status
+
+    statuses = detect_tool_status()
+    for tool_name in statuses.keys():
+        if tool_name not in all_tool_results:
+            all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+
+    evaln = evaluate_tools(text, camel_res, stanza_res, farasa_res, qalsadi_res=qalsadi_res, all_tool_results=all_tool_results)
 
     if format == "json":
         payload: Dict[str, Any] = {
