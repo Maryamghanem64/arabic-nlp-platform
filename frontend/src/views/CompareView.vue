@@ -246,6 +246,7 @@ import axios from 'axios'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
+import { canonicalToken } from '../utils/tokenModel'
 
 const route = useRoute()
 const inputText = ref('')
@@ -263,7 +264,7 @@ const compareCols = computed(() => toolOrder(activeTools.value).filter((key) => 
 const tokenEstimate = computed(() => (inputText.value.trim() ? inputText.value.trim().split(/\s+/).length : 0))
 const comparisonRows = computed(() => normalizeComparisonRows(comparisonPayload.value, compareCols.value))
 const fusionRows = computed(() => normalizeFusionRows(fusionPayload.value))
-const conflictRows = computed(() => normalizeConflicts(fusionRows.value))
+const conflictRows = computed(() => normalizeConflicts(fusionRows.value.length ? fusionRows.value : comparisonRows.value))
 const evaluation = computed(() => evaluationPayload.value?.evaluation || evaluationPayload.value || {})
 const hasResults = computed(() => Boolean(comparisonRows.value.length || fusionRows.value.length || Object.keys(evaluation.value).length))
 const toolStatusesLoaded = computed(() => Object.keys(toolStatuses.value).length > 0)
@@ -359,44 +360,27 @@ function normalizeComparisonRows(payload, cols) {
       index,
       word: row?.word || row?.surface || `#${index + 1}`,
       tools: normalizedTools,
+      conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
     }
   })
 }
 
 function normalizeToolCell(toolKey, raw) {
   const config = TOOL_CONFIG[toolKey] || {}
-  const best = unwrapAnalysis(raw)
+  const best = canonicalToken(raw)
   const lines = []
 
-  if (toolKey === 'camel' || toolKey === 'madamira') {
-    pushLine(lines, best.lemma, 'lemma', true)
-    pushLine(lines, best.pos || best.upos, 'pos')
-  } else if (toolKey === 'alkhalil') {
-    pushLine(lines, best.lemma, 'lemma', true)
-    pushLine(lines, best.root, 'root', true)
-  } else if (toolKey === 'farasa') {
-    const segmentation = toArray(best.segmentation || best.segments || best.parts)
-    pushLine(lines, segmentation.length ? segmentation.join(' + ') : '', 'segmentation')
-  } else if (toolKey === 'stanza') {
-    pushLine(lines, best.upos || best.pos, 'pos')
-    pushLine(lines, best.case, 'case')
-  } else if (toolKey === 'qalsadi') {
-    pushLine(lines, best.lemma, 'lemma', true)
-  } else if (toolKey === 'arabert') {
-    pushLine(lines, best.pos || best.upos, 'pos')
-  } else if (toolKey === 'udpipe') {
-    pushLine(lines, best.pos || best.upos, 'pos')
-    pushLine(lines, dependencyLabel(best), 'dependency')
-  } else {
-    for (const field of config.provides || []) {
-      pushLine(lines, readField(best, field), field, ['lemma', 'root', 'gloss', 'stem'].includes(field))
-      if (lines.length >= 2) break
-    }
+  for (const field of config.provides || []) {
+    pushLine(lines, readField(best, field), field, ['lemma', 'root', 'gloss', 'stem'].includes(field))
+  }
+
+  if (best.normalized || best.note) {
+    pushLine(lines, best.note || '(normalized)', 'note', true)
   }
 
   return {
     available: lines.length > 0,
-    lines: lines.slice(0, 2),
+    lines,
   }
 }
 
@@ -445,10 +429,7 @@ function normalizeConflicts(rows) {
 }
 
 function unwrapAnalysis(raw) {
-  if (!raw) return {}
-  if (Array.isArray(raw.analyses)) return raw.analyses[0] || {}
-  if (raw.final) return raw.final
-  return raw
+  return canonicalToken(raw)
 }
 
 function dependencyLabel(raw) {

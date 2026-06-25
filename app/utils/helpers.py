@@ -34,6 +34,31 @@ def strip_diacritics(text: Optional[str]) -> str:
     return re.sub(r"[\u064B-\u065F\u0670]", "", text)
 
 
+def normalize_lemma_for_compare(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    return strip_diacritics(str(text)).replace("ـ", "").strip().lower()
+
+
+def is_mwt_clitic_artifact(text: Optional[str]) -> bool:
+    return normalize_lemma_for_compare(text) in {"و", "ف", "ب", "ل", "ك", "ي"}
+
+
+def is_gender_convention_pair(val_a: Optional[str], val_b: Optional[str]) -> bool:
+    a = normalize_lemma_for_compare(val_a)
+    b = normalize_lemma_for_compare(val_b)
+    if not a or not b or a == b:
+        return False
+
+    def _gender_base(value: str) -> str:
+        for suffix in ("ة", "ه", "ۀ"):
+            if value.endswith(suffix) and len(value) > 1:
+                return value[:-1]
+        return value
+
+    return _gender_base(a) == _gender_base(b)
+
+
 def simplify_gloss(gloss: Optional[str]) -> Optional[str]:
     if not gloss:
         return None
@@ -136,6 +161,14 @@ def classify_conflict(feature: str, val_a: Any, val_b: Any) -> Dict[str, str]:
         "gender": "low",
         "number": "low",
     }
+    if feature == "lemma" and is_gender_convention_pair(str(val_a), str(val_b)):
+        return {
+            "feature": feature,
+            "tool_a": str(val_a),
+            "tool_b": str(val_b),
+            "severity": "low",
+            "type": "lemma_gender_convention",
+        }
     return {
         "feature": feature,
         "tool_a": str(val_a),

@@ -38,7 +38,7 @@ def analyze_tool(tool: str, text: str) -> Dict[str, Any]:
         return unavailable_result(tool, f"Unknown tool. Available tools: {', '.join(ALL_TOOLS)}", text)
 
     status = detect_tool_status().get(tool, {})
-    if status.get("status") not in (None, "ok") and tool != "sinatools":
+    if status.get("status") not in (None, "ok") and tool not in {"sinatools", "alkhalil"}:
         return unavailable_result(tool, status.get("reason", f"{tool} is not available."), text)
 
     def runner(value: str) -> Dict[str, Any]:

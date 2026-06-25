@@ -2,22 +2,34 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from app.services.merger_service import evaluate_tools, run_all_tools
+from app.core.startup import run_all_registered_tools
+from app.services.eval_service import evaluate_tools
 from app.utils.constants import GOLD_DATASET
 from app.utils.helpers import normalize_pos_for_compare
 
 
 def run_all_tools_for_dataset(text: str):
-    return run_all_tools(text)
+    return run_all_registered_tools(text)
 
 
 def evaluate_dataset() -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
 
     for item in GOLD_DATASET:
-        camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools_for_dataset(item["text"])
+        all_tool_results = run_all_tools_for_dataset(item["text"])
+        camel_res = all_tool_results.get("camel", {})
+        farasa_res = all_tool_results.get("farasa", {})
+        stanza_res = all_tool_results.get("stanza", {})
+        qalsadi_res = all_tool_results.get("qalsadi", {})
 
-        eval_result = evaluate_tools(item["text"], camel_res, stanza_res, farasa_res)
+        eval_result = evaluate_tools(
+            item["text"],
+            camel_res,
+            stanza_res,
+            farasa_res,
+            qalsadi_res=qalsadi_res,
+            all_tool_results=all_tool_results,
+        )
 
         gold_pos = {g["word"]: g["pos"] for g in item["gold"]}
         camel_tokens = camel_res.get("tokens", [])

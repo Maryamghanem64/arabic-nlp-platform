@@ -135,6 +135,29 @@ def _confidence(score: Optional[float]) -> Dict[str, Any]:
     return {"score": score_f, "level": level}
 
 
+def _analysis_payload(
+    *,
+    lemma: Any = None,
+    root: Any = None,
+    pos: Any = None,
+    gender: Any = None,
+    number: Any = None,
+    tense: Any = None,
+    gloss: Any = None,
+) -> List[Dict[str, Any]]:
+    return [
+        {
+            "lemma": lemma,
+            "root": root,
+            "pos": pos,
+            "gender": gender,
+            "number": number,
+            "tense": tense,
+            "gloss": gloss,
+        }
+    ]
+
+
 def _deep_copy_template() -> Dict[str, Any]:
     # Avoid shared mutable state
     import copy
@@ -231,7 +254,18 @@ def normalize_camel_output(raw_result: Dict[str, Any]) -> Dict[str, Any]:
                 dependency=dependency,
                 confidence=conf,
                 meta=meta,
-            )
+            ) | {
+                "meta": meta,
+                "analyses": _analysis_payload(
+                    lemma=best.get("lemma"),
+                    root=best.get("root"),
+                    pos=_pos_standardize(best.get("pos")),
+                    gender=best.get("gender"),
+                    number=best.get("number"),
+                    tense=best.get("tense"),
+                    gloss=best.get("gloss"),
+                )
+            }
         )
 
     return {
@@ -261,7 +295,10 @@ def normalize_farasa_output(raw_result: Dict[str, Any]) -> Dict[str, Any]:
                 dependency=None,
                 confidence=_confidence(None),
                 meta={"root_type": None, "corrections": [], "notes": []},
-            )
+            ) | {
+                "meta": {"root_type": None, "corrections": [], "notes": []},
+                "analyses": _analysis_payload(),
+            }
         )
 
     return {
@@ -308,7 +345,18 @@ def normalize_stanza_output(raw_result: Dict[str, Any]) -> Dict[str, Any]:
                 dependency=dependency,
                 confidence=_confidence(None),
                 meta={"root_type": None, "corrections": [], "notes": []},
-            )
+            ) | {
+                "meta": {"root_type": None, "corrections": [], "notes": []},
+                "analyses": _analysis_payload(
+                    lemma=tok.get("lemma"),
+                    root=None,
+                    pos=tok.get("pos") or tok.get("upos"),
+                    gender=feats.get("gender"),
+                    number=feats.get("number"),
+                    tense=feats.get("tense"),
+                    gloss=None,
+                )
+            }
         )
 
     return {
@@ -346,6 +394,7 @@ def normalize_qalsadi_output(raw_result: Dict[str, Any]) -> Dict[str, Any]:
         pos_raw = tok.get("pos")
         gloss = None
         pos = QALSADI_POS_MAP.get(pos_raw, pos_raw)
+        normalized_flag = bool(tok.get("normalized"))
 
         tokens_out.append(
             _unified_token(
@@ -360,7 +409,20 @@ def normalize_qalsadi_output(raw_result: Dict[str, Any]) -> Dict[str, Any]:
                 dependency=None,
                 confidence=_confidence(tok.get("freq")),
                 meta={"root_type": None, "corrections": [], "notes": []},
-            )
+            ) | {
+                "original_surface": tok.get("original_surface"),
+                "normalized": normalized_flag,
+                "note": tok.get("note") if normalized_flag else None,
+                "analyses": _analysis_payload(
+                    lemma=lemma,
+                    root=root,
+                    pos=pos,
+                    gender=None,
+                    number=None,
+                    tense=None,
+                    gloss=None,
+                )
+            }
         )
 
     return {
@@ -410,6 +472,111 @@ def normalize_tool_output(tool_name: str, raw_result: Dict[str, Any]) -> Dict[st
         return normalize_stanza_output(raw_result)
     if tool_name == "qalsadi":
         return normalize_qalsadi_output(raw_result)
+    if tool_name == "alkhalil":
+        tokens_out: List[Dict[str, Any]] = []
+        raw_tokens = raw_result.get("tokens", []) or []
+        raw_lemmas = raw_result.get("lemmas", []) or []
+        for idx, tok in enumerate(raw_tokens):
+            original_surface = None
+            normalized_flag = False
+            note = None
+            gloss_value = None
+            if isinstance(tok, dict):
+                surface = tok.get("surface")
+                lemma = tok.get("lemma")
+                root = tok.get("root")
+                pos = _pos_standardize(tok.get("upos") or tok.get("pos"))
+                gloss = tok.get("gloss")
+                original_surface = tok.get("original_surface")
+                normalized_flag = bool(tok.get("normalized"))
+                note = tok.get("note")
+                gloss_value = tok.get("gloss")
+            else:
+                surface = str(tok)
+                lemma = raw_lemmas[idx] if idx < len(raw_lemmas) else surface
+                root = None
+                pos = None
+                gloss = None
+            tokens_out.append(
+                _unified_token(
+                    source_tool="alkhalil",
+                    surface=surface,
+                    lemma=lemma,
+                    root=root,
+                    pos=pos,
+                    gloss=gloss,
+                    segmentation=[surface],
+                    features=None,
+                    dependency=None,
+                    confidence=_confidence(None),
+                    meta={"root_type": None, "corrections": [], "notes": []},
+                ) | {
+                    "meta": {"root_type": None, "corrections": [], "notes": []},
+                    "original_surface": original_surface,
+                    "normalized": normalized_flag,
+                    "note": note,
+                    "analyses": _analysis_payload(
+                        lemma=lemma,
+                        root=root,
+                        pos=pos,
+                        gender=None,
+                        number=None,
+                        tense=None,
+                        gloss=gloss_value,
+                    )
+                }
+            )
+        return {
+            "tool": "alkhalil",
+            "status": raw_result.get("status", "ok"),
+            "input": raw_result.get("input"),
+            "word_count": len(tokens_out),
+            "tokens": tokens_out,
+        }
+    if tool_name == "udpipe":
+        tokens_out: List[Dict[str, Any]] = []
+        for tok in raw_result.get("tokens", []) or []:
+            surface = tok.get("surface")
+            lemma = tok.get("lemma")
+            pos = _pos_standardize(tok.get("upos") or tok.get("pos"))
+            dependency_raw = tok.get("dependency") or {}
+            tokens_out.append(
+                _unified_token(
+                    source_tool="udpipe",
+                    surface=surface,
+                    lemma=lemma,
+                    root=None,
+                    pos=pos,
+                    gloss=None,
+                    segmentation=[surface],
+                    features={"case": tok.get("case")},
+                    dependency={
+                        "head": dependency_raw.get("head"),
+                        "head_text": dependency_raw.get("head_text"),
+                        "deprel": dependency_raw.get("deprel"),
+                    },
+                    confidence=_confidence(None),
+                    meta={"root_type": None, "corrections": [], "notes": []},
+                ) | {
+                    "meta": {"root_type": None, "corrections": [], "notes": []},
+                    "analyses": _analysis_payload(
+                        lemma=lemma,
+                        root=None,
+                        pos=pos,
+                        gender=None,
+                        number=None,
+                        tense=None,
+                        gloss=None,
+                    )
+                }
+            )
+        return {
+            "tool": "udpipe",
+            "status": raw_result.get("status", "ok"),
+            "input": raw_result.get("input"),
+            "word_count": len(tokens_out),
+            "tokens": tokens_out,
+        }
 
     # Partner/unknown tools: return empty normalized structure.
     return {

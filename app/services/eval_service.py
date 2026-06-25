@@ -46,27 +46,31 @@ def evaluate_tools(
     all_statuses.setdefault("stanza", stanza_res.get("status") if isinstance(stanza_res, dict) else None)
     all_statuses.setdefault("qalsadi", qalsadi_res.get("status") if isinstance(qalsadi_res, dict) else None)
 
-    active_tools = [t for t in metric_tools if all_statuses.get(t) == "ok"]
+    active_tools = [t for t, s in all_statuses.items() if s == "ok"]
     active_tool_count = len(active_tools)
     excluded_tools = sorted(
         {
             t
             for t, s in all_statuses.items()
-            if t not in active_tools or s in excluded or t not in metric_tools
+            if s in excluded
         }
     )
 
 
-    # Evaluate CAMeL vs Stanza using surface-string alignment (not index).
+    from backend.services.normalizer import normalize_tool_output
 
-
-    farasa_tokens = farasa_res.get("tokens", []) or []
-    camel_tokens = camel_res.get("tokens", []) or []
-    stanza_tokens = stanza_res.get("tokens", []) or []
+    normalized_results = {
+        name: normalize_tool_output(name, res if isinstance(res, dict) else {})
+        for name, res in all_tool_results.items()
+    }
+    normalized_results.setdefault("camel", normalize_tool_output("camel", camel_res if isinstance(camel_res, dict) else {}))
+    normalized_results.setdefault("stanza", normalize_tool_output("stanza", stanza_res if isinstance(stanza_res, dict) else {}))
+    normalized_results.setdefault("farasa", normalize_tool_output("farasa", farasa_res if isinstance(farasa_res, dict) else {}))
+    normalized_results.setdefault("qalsadi", normalize_tool_output("qalsadi", qalsadi_res if isinstance(qalsadi_res, dict) else {}))
 
     farasa_tokens_filtered = [
         t
-        for t in farasa_tokens
+        for t in (normalized_results.get("farasa", {}).get("tokens", []) or [])
         if isinstance(t, dict) and t.get("surface")
     ]
 
@@ -74,7 +78,13 @@ def evaluate_tools(
 
     aligned_tokens, _meta = align_tools(
         base_tokens=farasa_tokens_filtered,
-        tools_tokens={"camel": camel_tokens, "stanza": stanza_tokens},
+        tools_tokens={
+            "camel": normalized_results.get("camel", {}).get("tokens", []) or [],
+            "stanza": normalized_results.get("stanza", {}).get("tokens", []) or [],
+            "qalsadi": normalized_results.get("qalsadi", {}).get("tokens", []) or [],
+            "alkhalil": normalized_results.get("alkhalil", {}).get("tokens", []) or [],
+            "udpipe": normalized_results.get("udpipe", {}).get("tokens", []) or [],
+        },
     )
 
     agreements = compute_agreements(aligned_tokens=aligned_tokens)

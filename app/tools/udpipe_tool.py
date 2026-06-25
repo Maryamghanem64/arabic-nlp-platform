@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import urllib.request
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.utils.logger import logger
+from app.utils.helpers import strip_diacritics
 from backend.config.tool_paths import UDPipePaths
 
 
@@ -20,6 +22,15 @@ _udpipe_status: Dict[str, Any] = {
     "reason": "UDPipe has not been initialized yet.",
 }
 
+UDPIPE_DOWNLOAD_URLS = (
+    "https://lindat.mff.cuni.cz/repository/xmlui/bitstream/handle/11234/1-4964/arabic-padt-ud-2.10-220711.udpipe",
+    "https://ufal.mff.cuni.cz/~straka/papers/2017-conll_udpipe/udpipe-ud-2.0-conll17-170315-1-udpipe_models/arabic-ud-2.0-conll17-170315.udpipe",
+    "https://github.com/jwijffels/udpipe.models.ud.2.0/raw/master/inst/udpipe-ud-2.0-170801/arabic-ud-2.0-170801.udpipe",
+    "https://huggingface.co/datasets/universal-dependencies/arabic-padt/resolve/main/arabic-padt-ud-2.6-200830.udpipe",
+)
+UDPIPE_DOWNLOAD_PATH = Path(__file__).resolve().parent / "udpipe" / "arabic.udpipe"
+UDPIPE_MANUAL_HELP = "Download manually from: https://ufal.mff.cuni.cz/udpipe/2/models and place the file in app/tools/udpipe/"
+
 
 def _resolve_model_path() -> Optional[Path]:
     # Centralized resolver with strict search order.
@@ -31,6 +42,54 @@ def _set_status(status: str, reason: str, model_path: Optional[Path] = None) -> 
     _udpipe_status = {"status": status, "reason": reason}
     if model_path is not None:
         _udpipe_status["path"] = str(model_path)
+
+
+def _download_candidate(url: str, target: Path) -> Optional[Path]:
+    tmp_target = target.with_suffix(target.suffix + ".part")
+    logger.info("[UDPIPE] trying download url: %s", url)
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response, open(tmp_target, "wb") as handle:
+            total = response.headers.get("Content-Length")
+            expected = int(total) if total and total.isdigit() else None
+            downloaded = 0
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if expected:
+                    logger.info("[UDPIPE] download progress: %s/%s bytes", downloaded, expected)
+                else:
+                    logger.info("[UDPIPE] download progress: %s bytes", downloaded)
+
+        size = tmp_target.stat().st_size
+        if size < 1_000_000:
+            logger.warning("[UDPIPE] downloaded file too small (%s bytes), likely an error page", size)
+            tmp_target.unlink(missing_ok=True)
+            return None
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_target.replace(target)
+        logger.info("[UDPIPE] model downloaded to %s", target)
+        return target
+    except Exception as exc:
+        logger.warning("[UDPIPE] download failed from %s: %s", url, exc)
+        tmp_target.unlink(missing_ok=True)
+        return None
+
+
+def download_model() -> Path:
+    """Download the Arabic UDPipe model to the local tools directory."""
+    target = UDPIPE_DOWNLOAD_PATH
+    for url in UDPIPE_DOWNLOAD_URLS:
+        downloaded = _download_candidate(url, target)
+        if downloaded is not None:
+            return downloaded
+    raise RuntimeError(
+        "UDPipe model download failed. "
+        f"{UDPIPE_MANUAL_HELP}"
+    )
 
 
 def load_udpipe() -> None:
@@ -48,9 +107,22 @@ def load_udpipe() -> None:
 
     model_path = _resolve_model_path()
     if model_path is None:
+        try:
+            model_path = download_model()
+        except Exception as exc:
+            message = (
+                "UDPipe model not found and auto-download failed. "
+                f"{UDPIPE_MANUAL_HELP}. Error: {exc}"
+            )
+            logger.warning(message)
+            _set_status("unavailable", message)
+            return
+
+    if model_path is None or not model_path.exists():
         message = (
             "UDPipe model not found. Set UDPIPE_MODEL or place an arabic*.udpipe file under "
-            "app/tools/udpipe, app/tools/udpipe/models, or C:/Users/*/Desktop/*/tools/udpipe."
+            "app/tools/udpipe, app/tools/udpipe/models, or C:/Users/*/Desktop/*/tools/udpipe. "
+            f"{UDPIPE_MANUAL_HELP}."
         )
         logger.warning(message)
         _set_status("unavailable", message)
@@ -61,13 +133,28 @@ def load_udpipe() -> None:
 
         udpipe_model = ufal.udpipe.Model.load(str(model_path))
         if udpipe_model is None:
-            raise RuntimeError(f"UDPipe model load returned None for {model_path}")
+            _set_status(
+                "unavailable",
+                f"UDPipe model not found or could not be loaded from {model_path}",
+                model_path,
+            )
+            udpipe_model = None
+            udpipe_pipeline_obj = None
+            udpipe_model_path = None
+            return
 
         # Keep the pipeline instance hot for all requests.
-        udpipe_pipeline_obj = ufal.udpipe.Pipeline(udpipe_model, "tokenize", "tag", "parse")
+        pipeline_cls = ufal.udpipe.Pipeline
+        udpipe_pipeline_obj = pipeline_cls(udpipe_model, "tokenize", pipeline_cls.DEFAULT, pipeline_cls.DEFAULT, "conllu")
         udpipe_model_path = model_path
         logger.info("UDPipe model loaded from %s", model_path)
         _set_status("ok", f"UDPipe model loaded from {model_path}", model_path)
+    except FileNotFoundError as exc:
+        udpipe_model = None
+        udpipe_pipeline_obj = None
+        udpipe_model_path = None
+        logger.warning("UDPipe model missing at %s: %s", model_path, exc)
+        _set_status("unavailable", f"UDPipe model missing at {model_path}", model_path)
     except Exception as exc:
         udpipe_model = None
         udpipe_pipeline_obj = None
@@ -105,6 +192,32 @@ def _parse_features(raw: Any) -> Dict[str, Optional[str]]:
     return {"case": case}
 
 
+def fix_udpipe_lemma(surface: Optional[str], lemma: Optional[str]) -> Optional[str]:
+    if not lemma:
+        return lemma
+    if not surface:
+        return lemma
+
+    surface_text = str(surface)
+    lemma_text = str(lemma)
+
+    if surface_text.startswith("ال") and lemma_text.startswith("أل"):
+        lemma_text = "ا" + lemma_text[1:]
+
+    surface_no_diac = strip_diacritics(surface_text)
+    lemma_no_diac = strip_diacritics(lemma_text)
+    if surface_no_diac.endswith("أ") and lemma_no_diac.endswith("ا"):
+        lemma_text = lemma_text[:-1] + "أ"
+    elif surface_no_diac.endswith("إ") and lemma_no_diac.endswith("ا"):
+        lemma_text = lemma_text[:-1] + "إ"
+
+    return lemma_text
+
+
+def _fix_udpipe_lemma(surface: Optional[str], lemma: Optional[str]) -> Optional[str]:
+    return fix_udpipe_lemma(surface, lemma)
+
+
 def _token_from_word(word: Any, *, id_to_surface: Dict[int, str]) -> Optional[Dict[str, Any]]:
     surface = getattr(word, "form", None)
     if surface is None:
@@ -122,7 +235,7 @@ def _token_from_word(word: Any, *, id_to_surface: Dict[int, str]) -> Optional[Di
     if token_id_int is not None and token_id_int <= 0:
         return None
 
-    lemma = getattr(word, "lemma", None)
+    lemma = fix_udpipe_lemma(surface, getattr(word, "lemma", None))
     upos = getattr(word, "upos", None)
     head = getattr(word, "head", None)
     deprel = getattr(word, "deprel", None)
@@ -145,9 +258,21 @@ def _token_from_word(word: Any, *, id_to_surface: Dict[int, str]) -> Optional[Di
     return {
         "surface": str(surface),
         "lemma": None if lemma is None else str(lemma),
+        "pos": None if upos is None else str(upos),
         "upos": None if upos is None else str(upos),
         "case": _parse_features(feats).get("case"),
         "dependency": dependency,
+        "analyses": [
+            {
+                "lemma": None if lemma is None else str(lemma),
+                "root": None,
+                "pos": None if upos is None else str(upos),
+                "gender": None,
+                "number": None,
+                "tense": None,
+                "gloss": None,
+            }
+        ],
     }
 
 
@@ -272,7 +397,8 @@ def _parse_conllu(conllu_text: str) -> List[Dict[str, Any]]:
 
         token = {
             "surface": str(surface),
-            "lemma": None if lemma is None else str(lemma),
+            "lemma": fix_udpipe_lemma(str(surface), None if lemma is None else str(lemma)),
+            "pos": None if upos is None else str(upos),
             "upos": None if upos is None else str(upos),
             "case": _parse_features(feats).get("case"),
             "dependency": {
@@ -280,6 +406,17 @@ def _parse_conllu(conllu_text: str) -> List[Dict[str, Any]]:
                 "head_text": None,
                 "deprel": None if deprel in {"", "_"} else str(deprel),
             },
+            "analyses": [
+                {
+                    "lemma": None if lemma is None else str(lemma),
+                    "root": None,
+                    "pos": None if upos is None else str(upos),
+                    "gender": None,
+                    "number": None,
+                    "tense": None,
+                    "gloss": None,
+                }
+            ],
         }
         current_rows.append(token)
         if token_id > 0:
@@ -366,4 +503,3 @@ def udpipe_analyze(text: str) -> Dict[str, Any]:
             "word_count": 0,
             "tokens": [],
         }
-

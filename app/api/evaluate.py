@@ -8,7 +8,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.core.startup import run_all_tools, fusion_system, evaluate_tools
+from app.core.startup import run_all_registered_tools, fusion_system, evaluate_tools
 from app.utils.constants import GOLD_DATASET
 
 router = APIRouter()
@@ -22,61 +22,34 @@ def evaluate(text: str):
     if not text.strip():
         raise HTTPException(400, "Empty text")
 
-    # Bug 1: ensure per-request execution doesn't duplicate tool calls.
-    # Key includes endpoint + text; evaluation logic/metrics remain unchanged.
     key = f"evaluate::{text}"
     cached = _inflight_eval.get(key)
     if cached is not None:
-        camel_res, farasa_res, stanza_res = cached
-        from app.core.tool_registry import detect_tool_status
-        statuses = detect_tool_status()
-        all_tool_results = {
-            "camel": camel_res,
-            "farasa": farasa_res,
-            "stanza": stanza_res,
-        }
-        for tool_name in statuses.keys():
-            if tool_name not in all_tool_results:
-                all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+        return cached
 
-        return {
-            "input": text,
-            "evaluation": evaluate_tools(text, camel_res, stanza_res, farasa_res, qalsadi_res=all_tool_results.get("qalsadi"), all_tool_results=all_tool_results),
-        }
+    all_tool_results = run_all_registered_tools(text)
+    camel_res = all_tool_results.get("camel", {})
+    stanza_res = all_tool_results.get("stanza", {})
+    farasa_res = all_tool_results.get("farasa", {})
+    qalsadi_res = all_tool_results.get("qalsadi", {})
 
-
-    # Core tools used by fusion/evaluation.
-    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-
-    # Tool participation for metrics/excluded_tools must include qalsadi.
-    all_tool_results = {
-        "camel": camel_res,
-        "farasa": farasa_res,
-        "stanza": stanza_res,
-        "qalsadi": qalsadi_res,
-    }
-
-    # We don't run additional analysis; statuses come from tool_registry detect.
-    # evaluate_tools expects all_tool_results to contain each tool result.
-    # For inactive tools we construct lightweight dicts with the computed status.
-    from app.core.tool_registry import detect_tool_status
-
-    statuses = detect_tool_status()
-    for tool_name in statuses.keys():
-        if tool_name not in all_tool_results:
-            all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
-
-    _inflight_eval[key] = (camel_res, farasa_res, stanza_res)
-    return {
+    payload = {
         "input": text,
+        "tools": all_tool_results,
         "evaluation": evaluate_tools(
             text,
             camel_res,
             stanza_res,
             farasa_res,
-            qalsadi_res=all_tool_results.get("qalsadi"),
+            qalsadi_res=qalsadi_res,
             all_tool_results=all_tool_results,
         ),
+    }
+    _inflight_eval[key] = payload
+    return {
+        "input": text,
+        "tools": all_tool_results,
+        "evaluation": payload["evaluation"],
     }
 
 
@@ -87,24 +60,18 @@ def evaluate_dataset():
     """Evaluate tools against gold dataset — 10 sentences"""
     results = []
     for item in GOLD_DATASET:
-        camel_res, farasa_res, stanza_res, _ = run_all_tools(item["text"])
-        from app.core.tool_registry import detect_tool_status
-        statuses = detect_tool_status()
-        all_tool_results = {
-            "camel": camel_res,
-            "farasa": farasa_res,
-            "stanza": stanza_res,
-        }
-        for tool_name in statuses.keys():
-            if tool_name not in all_tool_results:
-                all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
+        all_tool_results = run_all_registered_tools(item["text"])
+        camel_res = all_tool_results.get("camel", {})
+        stanza_res = all_tool_results.get("stanza", {})
+        farasa_res = all_tool_results.get("farasa", {})
+        qalsadi_res = all_tool_results.get("qalsadi", {})
 
         eval_result = evaluate_tools(
             item["text"],
             camel_res,
             stanza_res,
             farasa_res,
-            qalsadi_res=all_tool_results.get("qalsadi"),
+            qalsadi_res=qalsadi_res,
             all_tool_results=all_tool_results,
         )
 
@@ -133,32 +100,18 @@ def export_results(text: str, format: str = Query("json", description="json or c
     if not text.strip():
         raise HTTPException(400, "Empty text")
 
-    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
-    fused = fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res)
-    all_tool_results = {
-        "camel": camel_res,
-        "farasa": farasa_res,
-        "stanza": stanza_res,
-        "qalsadi": qalsadi_res,
-    }
-    from app.core.tool_registry import detect_tool_status
-
-    statuses = detect_tool_status()
-    for tool_name in statuses.keys():
-        if tool_name not in all_tool_results:
-            all_tool_results[tool_name] = {"status": statuses[tool_name].get("status"), "reason": statuses[tool_name].get("reason")}
-
+    all_tool_results = run_all_registered_tools(text)
+    camel_res = all_tool_results.get("camel", {})
+    stanza_res = all_tool_results.get("stanza", {})
+    farasa_res = all_tool_results.get("farasa", {})
+    qalsadi_res = all_tool_results.get("qalsadi", {})
+    fused = fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res=qalsadi_res, all_tool_results=all_tool_results)
     evaln = evaluate_tools(text, camel_res, stanza_res, farasa_res, qalsadi_res=qalsadi_res, all_tool_results=all_tool_results)
 
     if format == "json":
         payload: Dict[str, Any] = {
             "input": text,
-            "combined": {
-                "camel": camel_res,
-                "farasa": farasa_res,
-                "stanza": stanza_res,
-                "qalsadi": qalsadi_res,
-            },
+            "combined": all_tool_results,
             "fusion": fused,
             "evaluation": evaln,
         }

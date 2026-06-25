@@ -171,6 +171,14 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
     alkhalil_jar = jar_resolver.resolve()
 
     alkhalil_file_exists = alkhalil_jar.exists() and alkhalil_jar.is_file()
+    alkhalil_source = PROJECT_ROOT / "app" / "tools" / "alkhalil" / "AlKhalil1.1" / "src" / "AlKhalil" / "AlKhalil.java"
+    alkhalil_gui_only = False
+    if alkhalil_source.exists():
+        try:
+            source_text = alkhalil_source.read_text(encoding="utf-8", errors="replace")
+            alkhalil_gui_only = "new Gui(" in source_text or "Gui fen = new Gui()" in source_text
+        except Exception:
+            alkhalil_gui_only = False
 
     if java["status"] != "ok":
         statuses["alkhalil"] = {
@@ -181,16 +189,25 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
             "jar_exists": bool(alkhalil_file_exists),
         }
     else:
-        statuses["alkhalil"] = {
-            "status": "ok" if alkhalil_file_exists else "missing_model",
-            "reason": (
-                f"AlKhalil JAR detected at {alkhalil_jar}."
-                if alkhalil_file_exists
-                else "AlKhalil JAR not found. Set ALKHALIL_JAR or ensure the jar exists under app/tools/alkhalil/AlKhalil1.1/Alkhalil.jar."
-            ),
-            "resolved_jar": str(alkhalil_jar),
-            "jar_exists": bool(alkhalil_file_exists),
-        }
+        if alkhalil_gui_only:
+            statuses["alkhalil"] = {
+                "status": "future_work",
+                "reason": "Bundled AlKhalil build is GUI-only (main() instantiates Gui) and does not expose a CLI analysis entry point.",
+                "resolved_jar": str(alkhalil_jar),
+                "jar_exists": bool(alkhalil_file_exists),
+                "source": str(alkhalil_source),
+            }
+        else:
+            statuses["alkhalil"] = {
+                "status": "ok" if alkhalil_file_exists else "missing_model",
+                "reason": (
+                    f"AlKhalil JAR detected at {alkhalil_jar}."
+                    if alkhalil_file_exists
+                    else "AlKhalil JAR not found. Set ALKHALIL_JAR or ensure the jar exists under app/tools/alkhalil/AlKhalil1.1/Alkhalil.jar."
+                ),
+                "resolved_jar": str(alkhalil_jar),
+                "jar_exists": bool(alkhalil_file_exists),
+            }
 
     statuses["udpipe"] = get_udpipe_status()
 

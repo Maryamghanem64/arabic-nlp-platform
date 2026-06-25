@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.startup import cached_analyze, camel_analyze, farasa_analyze, stanza_analyze, qalsadi_analyze
+from app.tools.alkhalil_tool import alkhalil_analyze
+from app.tools.udpipe_tool import udpipe_analyze
 
 router = APIRouter()
 
@@ -95,11 +97,18 @@ def ui_analyze(tool: str, text: str):
         raise HTTPException(400, "Empty text")
 
     tool_l = tool.strip().lower()
-    if tool_l not in {"camel", "farasa", "stanza", "qalsadi"}:
+    if tool_l not in {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe"}:
         raise HTTPException(404, "Tool not supported for ui/analyze")
 
     raw = cached_analyze(
-        {"camel": camel_analyze, "farasa": farasa_analyze, "stanza": stanza_analyze, "qalsadi": qalsadi_analyze}[tool_l],
+        {
+            "camel": camel_analyze,
+            "farasa": farasa_analyze,
+            "stanza": stanza_analyze,
+            "qalsadi": qalsadi_analyze,
+            "alkhalil": alkhalil_analyze,
+            "udpipe": udpipe_analyze,
+        }[tool_l],
         text,
     )
 
@@ -136,6 +145,10 @@ def ui_compare(text: str, tools: str = Query("camel,stanza,qalsadi,farasa")):
         raw_results["stanza"] = cached_analyze(stanza_analyze, text)
     if "qalsadi" in tool_list:
         raw_results["qalsadi"] = cached_analyze(qalsadi_analyze, text)
+    if "alkhalil" in tool_list:
+        raw_results["alkhalil"] = cached_analyze(alkhalil_analyze, text)
+    if "udpipe" in tool_list:
+        raw_results["udpipe"] = cached_analyze(udpipe_analyze, text)
 
     norm = {t: _normalize_for_ui(t, raw_results[t]) for t in raw_results.keys()}
 
@@ -150,7 +163,7 @@ def ui_compare(text: str, tools: str = Query("camel,stanza,qalsadi,farasa")):
 
     rows = []
     for at in aligned:
-        row = {"word": at.base.get("surface"), "camel": None, "stanza": None, "qalsadi": None, "farasa": None, "agreement": None}
+        row = {"word": at.base.get("surface"), "camel": None, "stanza": None, "qalsadi": None, "alkhalil": None, "udpipe": None, "farasa": None, "agreement": None}
 
         if "camel" in norm:
             row["camel"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("camel"), tool_name="camel")
@@ -158,6 +171,10 @@ def ui_compare(text: str, tools: str = Query("camel,stanza,qalsadi,farasa")):
             row["stanza"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("stanza"), tool_name="stanza")
         if "qalsadi" in norm:
             row["qalsadi"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("qalsadi"), tool_name="qalsadi")
+        if "alkhalil" in norm:
+            row["alkhalil"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("alkhalil"), tool_name="alkhalil")
+        if "udpipe" in norm:
+            row["udpipe"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("udpipe"), tool_name="udpipe")
         if "farasa" in norm:
             row["farasa"] = _ui_token_from_aligned(base_token=at.base, tool_token=at.tools.get("farasa"), tool_name="farasa")
 
@@ -175,11 +192,15 @@ def ui_fusion(text: str):
     camel_raw = cached_analyze(camel_analyze, text)
     stanza_raw = cached_analyze(stanza_analyze, text)
     qalsadi_raw = cached_analyze(qalsadi_analyze, text)
+    alkhalil_raw = cached_analyze(alkhalil_analyze, text)
+    udpipe_raw = cached_analyze(udpipe_analyze, text)
     farasa_raw = cached_analyze(farasa_analyze, text)
 
     camel_n = _normalize_for_ui("camel", camel_raw)
     stanza_n = _normalize_for_ui("stanza", stanza_raw)
     qalsadi_n = _normalize_for_ui("qalsadi", qalsadi_raw)
+    alkhalil_n = _normalize_for_ui("alkhalil", alkhalil_raw)
+    udpipe_n = _normalize_for_ui("udpipe", udpipe_raw)
     farasa_n = _normalize_for_ui("farasa", farasa_raw)
 
     base_tokens = farasa_n.get("tokens", []) or []
@@ -187,6 +208,8 @@ def ui_fusion(text: str):
         "camel": camel_n.get("tokens", []) or [],
         "stanza": stanza_n.get("tokens", []) or [],
         "qalsadi": qalsadi_n.get("tokens", []) or [],
+        "alkhalil": alkhalil_n.get("tokens", []) or [],
+        "udpipe": udpipe_n.get("tokens", []) or [],
         "farasa": farasa_n.get("tokens", []) or [],
     }
 
@@ -202,8 +225,11 @@ def ui_fusion(text: str):
 
         agreement = _agreement_for_row(aligned_row=at)
 
+        alkhalil = at.tools.get("alkhalil")
+        udpipe = at.tools.get("udpipe")
+
         def pick(feature: str):
-            for t, src in [(camel, "camel"), (stanza, "stanza"), (qalsadi, "qalsadi")]:
+            for t, src in [(camel, "camel"), (stanza, "stanza"), (qalsadi, "qalsadi"), (alkhalil, "alkhalil"), (udpipe, "udpipe")]:
                 if t and t.get(feature):
                     return t.get(feature), src
             return None, "-"
@@ -215,7 +241,7 @@ def ui_fusion(text: str):
         from backend.services.ui_contracts import placeholder, safe_pos
 
         confs = []
-        for t in [camel, stanza, qalsadi]:
+        for t in [camel, stanza, qalsadi, alkhalil, udpipe]:
             if t and isinstance(t.get("confidence"), dict):
                 confs.append(float(t["confidence"].get("score") or 0.0))
         confidence = round(sum(confs) / len(confs), 2) if confs else 0.0

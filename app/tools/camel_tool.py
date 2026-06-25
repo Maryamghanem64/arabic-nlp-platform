@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from app.core.tool_registry import unavailable_result
 from app.tools.base_tool import BaseTool
 from app.utils.constants import ASPECT_MAP, GENDER_MAP, NUMBER_MAP
-from app.utils.helpers import augment_root, clean_root, confidence_bucket, correct_number, map_pos, simplify_gloss
+from app.utils.helpers import augment_root, clean_root, confidence_bucket, correct_number, map_pos, simplify_gloss, normalize_lemma_for_compare
 from app.tools.camel_root_patch import patch_camel_root
 from app.utils.logger import logger, log_time
 
@@ -17,6 +17,55 @@ simple_word_tokenize = None
 camel_db = None
 camel_disambiguator = None
 camel_import_error = None
+
+
+GLOSS_OVERRIDE = {
+    "فصل": {
+        "gloss": "class/chapter/semester",
+        "bad_glosses": {"discharge", "separate", "split", "division"},
+    },
+    "مكتبة": {
+        "gloss": "library/bookstore",
+        "bad_glosses": {"translation", "wrong translation", "book"},
+    },
+    "معلم": {
+        "gloss": "teacher",
+        "bad_glosses": {"learned man", "scholar", "disciple"},
+    },
+    "طالب": {
+        "gloss": "student",
+        "bad_glosses": {"seeker", "requester", "demanding"},
+    },
+    "مدرسة": {
+        "gloss": "school",
+        "bad_glosses": {"lesson", "teacher"},
+    },
+    "جامعة": {
+        "gloss": "university",
+        "bad_glosses": {"collection", "gathering"},
+    },
+    "كتاب": {
+        "gloss": "book",
+        "bad_glosses": {"writing", "decree", "letter"},
+    },
+}
+
+
+def _override_gloss(lemma: str | None, gloss: str | None) -> str | None:
+    lemma_key = normalize_lemma_for_compare(lemma)
+    if not lemma_key or lemma_key not in GLOSS_OVERRIDE:
+        return gloss
+
+    override = GLOSS_OVERRIDE[lemma_key]
+    override_gloss = override["gloss"]
+    if not gloss:
+        return override_gloss
+
+    simplified = normalize_lemma_for_compare(gloss)
+    bad_glosses = {normalize_lemma_for_compare(item) for item in override.get("bad_glosses", set())}
+    if simplified in bad_glosses or simplified not in {normalize_lemma_for_compare(override_gloss)}:
+        return override_gloss
+    return gloss
 
 
 def _ensure_imports() -> bool:
@@ -95,6 +144,7 @@ def camel_analyze(text: str) -> Dict[str, Any]:
                 # Repair 3: keep patched root_type instead of augment_root's type
                 root_type = patched_type
                 clean_gloss = part_gloss or simplify_gloss(raw_gloss)
+                clean_gloss = _override_gloss(raw_lemma, clean_gloss)
                 corrected_num, num_fixed = correct_number(token, NUMBER_MAP.get(features.get("num")), segs, map_pos(raw_pos))
                 corrections: List[str] = []
                 if aug_root != raw_root:

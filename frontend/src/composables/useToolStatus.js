@@ -9,7 +9,7 @@ export function useToolStatus() {
   const error = ref(null)
 
   const activeTools = computed(() =>
-    TOOL_KEYS.filter((tool) => toolStatuses.value[tool]?.status === 'ok'),
+    TOOL_KEYS.filter((tool) => ['ok', 'partial'].includes(toolStatuses.value[tool]?.status)),
   )
 
   function normalizeStatuses(payload) {

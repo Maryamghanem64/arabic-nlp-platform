@@ -30,38 +30,33 @@ def compute_tool_confidence(
     meta: Dict[str, Any],
     suspicious_flags: List[str],
 ) -> float:
-    base = float(meta.get("confidence_weight", 0.1))
+    base = float(meta.get("confidence_weight", 0.35))
+    score = max(base, 0.25)
 
-    score = base
-
-    # POS
-    if _is_unknown_pos(pos):
-        score -= 0.25
-    else:
-        score += 0.25
-
-    # lemma validity
-    if lemma is None or str(lemma).strip() == "":
-        score -= 0.25
-    else:
-        # very short lemmas are suspicious
-        if len(str(lemma).strip()) < 2:
-            score -= 0.2
-        else:
-            score += 0.1
-
-    # segmentation availability
+    # Successful analyses should be rewarded for providing the expected
+    # signals of the analyzer, rather than being penalized by sentence-wide
+    # disagreement or tokenization drift.
     if tool_name == "farasa":
-        if not segmentation:
-            score -= 0.25
+        if segmentation:
+            score += 0.45
         else:
-            score += 0.25
+            score -= 0.1
+    else:
+        if not _is_unknown_pos(pos):
+            score += 0.3
+        else:
+            score -= 0.15
 
-    # suspicious flags reduce
+        if lemma is not None and str(lemma).strip():
+            score += 0.2
+            if len(str(lemma).strip()) >= 2:
+                score += 0.05
+        else:
+            score -= 0.15
+
     if suspicious_flags:
-        score -= min(0.35, 0.08 * len(suspicious_flags))
+        score -= min(0.2, 0.05 * len(suspicious_flags))
 
-    # clamp
     score = max(0.0, min(1.0, score))
     return round(score, 3)
 

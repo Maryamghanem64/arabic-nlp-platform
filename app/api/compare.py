@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.core.startup import run_all_tools
+from app.core.startup import run_all_registered_tools
+from backend.services.alignment_engine import align_tools
+from backend.services.comparison_service import build_conflicts
+from backend.services.normalizer import normalize_tool_output
 
 router = APIRouter()
+
+VALID_COMPARE_TOOLS = {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe"}
 
 
 def _parse_tools(tools: str) -> list[str]:
@@ -12,57 +17,51 @@ def _parse_tools(tools: str) -> list[str]:
 
 
 @router.get("/compare")
-def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi")):
+def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi,alkhalil,udpipe")):
     if not text or not text.strip():
         raise HTTPException(400, "Empty text")
 
-    tool_list = set(_parse_tools(tools))
-    if not tool_list:
-        raise HTTPException(400, "No tools requested")
+    requested = [tool for tool in _parse_tools(tools) if tool in VALID_COMPARE_TOOLS]
+    if not requested:
+        raise HTTPException(400, "No supported tools requested")
 
-    # Run core tools (do not change tool execution logic—reuse existing run_all_tools)
-    camel_res, farasa_res, stanza_res, qalsadi_res = run_all_tools(text)
+    all_results = run_all_registered_tools(text)
+    normalized = {name: normalize_tool_output(name, payload) for name, payload in all_results.items() if name in VALID_COMPARE_TOOLS}
 
-    all_results = {
-        "camel": camel_res,
-        "farasa": farasa_res,
-        "stanza": stanza_res,
-        "qalsadi": qalsadi_res,
-    }
+    present_tools = [tool for tool in requested if tool in normalized and (normalized[tool].get("tokens") or [])]
+    base_tool = "farasa" if "farasa" in present_tools else next((tool for tool in requested if tool in present_tools), None)
+    if base_tool is None:
+        base_tool = "farasa" if "farasa" in normalized else next((tool for tool in requested if tool in normalized), None)
+    if base_tool is None:
+        raise HTTPException(503, "No compare-capable tool returned tokens")
 
-    # UI CompareView expects { comparison: [ {word, tools:{toolKey: {available, entries}} } ] }
-    # The UI normalizes shapes itself; we return a minimal backend contract compatible with its normalization.
-    # We return per-tool token arrays under each tool key.
+    base_tokens = normalized.get(base_tool, {}).get("tokens", []) or []
+    tools_tokens = {tool: normalized.get(tool, {}).get("tokens", []) or [] for tool in requested if tool in normalized}
 
-    def extract_tokens(payload):
-        if isinstance(payload, dict):
-            if isinstance(payload.get("tokens"), list):
-                return payload.get("tokens")
-            if isinstance(payload.get("analyses"), list) and payload["analyses"]:
-                # fallback if wrapped
-                return payload.get("analyses", [])
-        return []
+    aligned, _meta = align_tools(base_tokens=base_tokens, tools_tokens=tools_tokens)
 
-    tokens_by_tool = {k: extract_tokens(all_results.get(k, {})) for k in tool_list if k in all_results}
-
-    # Simple alignment-free fallback: index by tool token positions.
-    # The frontend only requires that tools[toolKey] exists; its normalization handles missing cells.
-    max_len = max((len(v) for v in tokens_by_tool.values()), default=0)
     comparison = []
-    for i in range(max_len):
-        row = {"index": i, "word": None, "tools": {}}
-        for tool_key in tokens_by_tool.keys():
-            tok = tokens_by_tool[tool_key][i] if i < len(tokens_by_tool[tool_key]) else None
-            row["tools"][tool_key] = tok if tok is not None else {}
-        # word fallback
-        for tool_key in tokens_by_tool.keys():
-            tok = tokens_by_tool[tool_key][i] if i < len(tokens_by_tool[tool_key]) else None
-            if tok and (tok.get("surface") or tok.get("word")):
-                row["word"] = tok.get("surface") or tok.get("word")
-                break
-        if not row["word"]:
-            row["word"] = f"#{i+1}"
-        comparison.append(row)
+    for index, row in enumerate(aligned):
+        row_conflicts = build_conflicts(
+            camel_tok=row.tools.get("camel"),
+            stanza_tok=row.tools.get("stanza"),
+            qalsadi_tok=row.tools.get("qalsadi"),
+            alkhalil_tok=row.tools.get("alkhalil"),
+            udpipe_tok=row.tools.get("udpipe"),
+        )
+        comparison.append(
+            {
+                "index": index,
+                "word": row.base.get("surface") or f"#{index + 1}",
+                "tools": {tool: row.tools.get(tool) or {} for tool in tools_tokens.keys()},
+                "conflicts": row_conflicts,
+            }
+        )
 
-    return {"input": text, "comparison": comparison, "active_tools": sorted(tool_list)}
-
+    return {
+        "input": text,
+        "comparison": comparison,
+        "active_tools": present_tools,
+        "normalized_tools": {tool: normalized.get(tool, {}) for tool in requested},
+        "base_tool": base_tool,
+    }

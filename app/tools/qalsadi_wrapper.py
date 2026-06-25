@@ -72,6 +72,7 @@ def qalsadi_analyze(text: str) -> Dict[str, Any]:
             tokenizer = _get_simple_tokenizer() or _fallback_tokenize
             _thread_local.tokenizer = tokenizer
 
+        original_tokens_text = tokenizer(text) if callable(tokenizer) else _fallback_tokenize(text)
         tokens_text = tokenizer(normalized) if callable(tokenizer) else _fallback_tokenize(normalized)
         lemmas = analyzer.lemmatize_text(normalized)
 
@@ -80,7 +81,35 @@ def qalsadi_analyze(text: str) -> Dict[str, Any]:
         lemmas_out: List[str] = []
         for i, word in enumerate(tokens_text):
             lemma = lemmas[i] if i < len(lemmas) else word
-            tokens.append({"surface": word, "lemma": lemma, "pos": None, "stem": None})
+            original_surface = original_tokens_text[i] if i < len(original_tokens_text) else word
+            normalized_flag = original_surface != word
+            tokens.append(
+                {
+                    "surface": word,
+                    "original_surface": original_surface,
+                    "lemma": lemma,
+                    "root": None,
+                    "pos": None,
+                    "gender": None,
+                    "number": None,
+                    "tense": None,
+                    "gloss": None,
+                    "stem": None,
+                    "normalized": normalized_flag,
+                    "note": "surface normalized by qalsadi" if normalized_flag else None,
+                    "analyses": [
+                        {
+                            "lemma": lemma,
+                            "root": None,
+                            "pos": None,
+                            "gender": None,
+                            "number": None,
+                            "tense": None,
+                            "gloss": None,
+                        }
+                    ],
+                }
+            )
             lemmas_out.append(lemma)
 
         # Unified schema: keep tokens list and also supply `lemmas`.

@@ -140,7 +140,7 @@
                 <span :class="['pill', statusPill(toolStatus(tool.key))]">{{ statusLabel(toolStatus(tool.key)) }}</span>
               </div>
 
-              <div v-if="toolStatus(tool.key) === 'ok' && toolRows(tool.key).length" class="table-scroll tool-table">
+              <div v-if="isRenderableToolStatus(toolStatus(tool.key)) && toolRows(tool.key).length" class="table-scroll tool-table">
                 <table>
                   <thead>
                     <tr>
@@ -164,7 +164,7 @@
                   </tbody>
                 </table>
               </div>
-              <div v-else-if="toolStatus(tool.key) === 'ok'" class="empty-state">No token output is available for this tool.</div>
+              <div v-else-if="isRenderableToolStatus(toolStatus(tool.key))" class="empty-state">No token output is available for this tool.</div>
               <div v-else class="status-card">
                 <strong>{{ statusLabel(toolStatus(tool.key)) }}</strong>
                 <p>{{ toolReason(tool.key) || 'The backend returned a safe unavailable response.' }}</p>
@@ -184,7 +184,7 @@
               <span :class="['pill', statusPill(toolStatus(selectedTool))]">{{ statusLabel(toolStatus(selectedTool)) }}</span>
             </div>
 
-            <div v-if="toolStatus(selectedTool) === 'ok' && toolRows(selectedTool).length" class="table-scroll tool-table">
+            <div v-if="isRenderableToolStatus(toolStatus(selectedTool)) && toolRows(selectedTool).length" class="table-scroll tool-table">
               <table>
                 <thead>
                   <tr>
@@ -285,6 +285,7 @@ import axios from 'axios'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
+import { canonicalToken } from '../utils/tokenModel'
 
 const route = useRoute()
 const inputText = ref('')
@@ -336,7 +337,7 @@ function selectTool(toolKey) {
   }
 
   const status = toolStatus(toolKey)
-  if (status === 'ok' || status === 'lazy' || status === 'unknown') {
+  if (status === 'ok' || status === 'partial' || status === 'lazy' || status === 'unknown') {
     selectedTool.value = toolKey
     selectionNotice.value =
       status === 'lazy'
@@ -412,7 +413,7 @@ function toolRows(toolKey) {
   const payload = selectedTool.value === 'all' ? rawResults.value?.[toolKey] : rawResults.value
   const tokens = Array.isArray(payload?.tokens) ? payload.tokens : []
   return tokens.map((token, index) => {
-    const best = unwrapAnalysis(token)
+    const best = canonicalToken(token)
     const values = {}
     for (const field of TOOL_CONFIG[toolKey].provides) {
       values[field] = readField(best, field)
@@ -455,10 +456,14 @@ function fusionSourceChips(sources) {
 }
 
 function unwrapAnalysis(token) {
-  if (!token) return {}
-  if (Array.isArray(token.analyses)) return token.analyses[0] || {}
-  if (token.final) return token.final
-  return token
+  return canonicalToken(token)
+}
+
+function formatSegmentation(token) {
+  if (Array.isArray(token?.segmentation) && token.segmentation.length) return token.segmentation.join(' + ')
+  if (Array.isArray(token?.segments) && token.segments.length) return token.segments.join(' + ')
+  if (Array.isArray(token?.parts) && token.parts.length) return token.parts.join(' + ')
+  return token?.segmentation || token?.segments || token?.parts || ''
 }
 
 function confidenceFromToken(token) {
@@ -475,13 +480,25 @@ function confidenceFromToken(token) {
 
 function readField(raw, field) {
   if (!raw) return ''
+
   if (field === 'pos') return raw.pos || raw.upos || ''
-  if (field === 'segmentation') return Array.isArray(raw.segmentation) ? raw.segmentation.join(' + ') : raw.segmentation || ''
+
+  if (field === 'segmentation') {
+    const arr =
+      raw.segmentation ||
+      raw.segments ||
+      raw.parts
+
+    if (Array.isArray(arr)) return arr.join(' + ')
+    return arr || ''
+  }
+
   if (field === 'dependency') {
     const dependency = raw.dependency || raw.dep || {}
     const deprel = dependency.deprel || raw.deprel || ''
     return deprel ? (dependency.head_text ? `${deprel} -> ${dependency.head_text}` : deprel) : ''
   }
+
   return raw[field] || ''
 }
 
@@ -507,6 +524,13 @@ function isArabicField(field) {
 
 function formatCellValue(field, value) {
   if (Array.isArray(value)) return value.join(' + ')
+
+  if (field === 'segmentation') {
+    if (Array.isArray(value)) return value.join(' + ')
+    if (!value) return '—'
+    return String(value)
+  }
+
   if (value === null || value === undefined || value === '') return '—'
   return String(value)
 }
@@ -532,6 +556,10 @@ function statusLabel(status) {
   if (status === 'lazy') return 'loads on demand'
   if (status === 'future_work') return 'planned'
   return 'status unknown'
+}
+
+function isRenderableToolStatus(status) {
+  return ['ok', 'partial', 'lazy', 'unknown'].includes(status)
 }
 
 function statusPill(status) {

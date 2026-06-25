@@ -122,7 +122,7 @@ def load_farasa() -> None:
         logger.warning("Farasa unavailable: %s", message)
         farasa_segmenter = None
         farasa_model_path = None
-        _set_farasa_status("error", message)
+        _set_farasa_status("unavailable", message)
         return
 
     try:
@@ -178,7 +178,7 @@ def farasa_analyze(text: str) -> Dict[str, Any]:
         for i, token in enumerate(raw_tokens):
             seg = raw_segs[i] if i < len(raw_segs) else token
             parts = [p for p in seg.split("+") if p]
-            token_outputs.append({"surface": token, "segmentation": parts})
+            token_outputs.append({"surface": token, "segmentation": parts, "analyses": []})
 
         log_time("farasa", text, time.time() - t0)
         return {
@@ -219,4 +219,3 @@ class FarasaTool(BaseTool):
 
     def analyze(self, text: str) -> Dict[str, Any]:
         return farasa_analyze(text)
-

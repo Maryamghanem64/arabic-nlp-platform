@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import ufal
 
 from app.utils.logger import logger
+from app.utils.helpers import strip_diacritics
 
 
 from backend.config.tool_paths import UDPipePaths
@@ -78,6 +79,24 @@ def _get_model():
         return None
 
 
+def _fix_udpipe_lemma(surface: Optional[str], lemma: Optional[str]) -> Optional[str]:
+    if not lemma or not surface:
+        return lemma
+
+    surface_text = str(surface)
+    lemma_text = str(lemma)
+    if surface_text.startswith("ال") and lemma_text.startswith("أل"):
+        lemma_text = "ا" + lemma_text[1:]
+
+    surface_no_diac = strip_diacritics(surface_text)
+    lemma_no_diac = strip_diacritics(lemma_text)
+    if surface_no_diac.endswith("أ") and lemma_no_diac.endswith("ا"):
+        lemma_text = lemma_text[:-1] + "أ"
+    elif surface_no_diac.endswith("إ") and lemma_no_diac.endswith("ا"):
+        lemma_text = lemma_text[:-1] + "إ"
+    return lemma_text
+
+
 def udpipe_analyze(text: str) -> Dict[str, Any]:
     from app.core.tool_registry import unified_result
 
@@ -109,7 +128,8 @@ def udpipe_analyze(text: str) -> Dict[str, Any]:
 
 
         # Processing
-        proc = ufal.udpipe.Pipeline(model, "tokenize", "tag", "parse")
+        pipeline_cls = ufal.udpipe.Pipeline
+        proc = pipeline_cls(model, "tokenize", pipeline_cls.DEFAULT, pipeline_cls.DEFAULT, "conllu")
         # Some UDPipe versions use `tagger` differently; pipeline should be robust.
         sentence = text if text is not None else ""
 
@@ -125,7 +145,7 @@ def udpipe_analyze(text: str) -> Dict[str, Any]:
             for i in range(s.length()):
                 t = s[i]
                 tok = t.form
-                lemma = t.lemma
+                lemma = _fix_udpipe_lemma(tok, t.lemma)
                 upos = t.upos
                 # Dependency fields vary by UDPipe build; use getattr defensively.
                 # In udpipe, t.head and t.deprel exist.
