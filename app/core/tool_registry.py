@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-
 from app.utils.logger import logger
 
 
@@ -35,12 +34,9 @@ def unified_result(
     }
 
 
-
-
 def unavailable_result(tool: str, reason: str, text: str = "") -> Dict[str, Any]:
     # Keep signature for existing callers, but always return the unified schema.
     return unified_result(tool=tool, status="unavailable", tokens=[], lemmas=[], pos=[], reason=reason)
-
 
 
 def safe_import(module_name: str):
@@ -108,7 +104,6 @@ def model_path_status(env_name: str, default_relative: str, missing_status: str)
 
 
 def detect_tool_status() -> Dict[str, Dict[str, Any]]:
-    # AlKhalil jar resolver lives in the centralized tool_paths module.
     from backend.config.tool_paths import AlKhalilPaths
 
     jar_resolver = AlKhalilPaths()
@@ -116,7 +111,6 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
     from app.tools.udpipe_tool import get_udpipe_status
 
     java = java_status()
-
     statuses: Dict[str, Dict[str, Any]] = {}
 
     statuses["camel"] = (
@@ -150,68 +144,43 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
         else {"status": "missing_dependency", "reason": "Install qalsadi and camel-tools."}
     )
 
-    # AraBERT lazy-loading status (server startup should not block)
-    # If arabert_tool is importable, report its current lazy state.
     try:
         from app.tools import arabert_tool as _arabert_tool
 
-        status = _arabert_tool.get_arabert_status()
+        arabert_status = _arabert_tool.get_arabert_status_detail()
         statuses["arabert"] = {
-            "status": status,
-            "reason": "Lazy — loads on first request (~700MB)" if status != "ok" else "",
+            "status": arabert_status.get("status", "unknown"),
+            "reason": arabert_status.get("reason", ""),
+            "model_id": arabert_status.get("model_id"),
+            "loaded": arabert_status.get("loaded", False),
         }
     except Exception:
         statuses["arabert"] = (
-            {"status": "ok", "reason": "transformers and torch detected. Model download may still be needed."}
+            {"status": "ok", "reason": "transformers and torch detected. Model will lazy-load on first request."}
             if has_module("transformers") and has_module("torch")
             else {"status": "missing_dependency", "reason": "Optional AraBERT requires transformers and torch."}
         )
 
+    try:
+        from app.tools.alkhalil_tool import get_alkhalil_status
 
-    alkhalil_jar = jar_resolver.resolve()
-
-    alkhalil_file_exists = alkhalil_jar.exists() and alkhalil_jar.is_file()
-    alkhalil_source = PROJECT_ROOT / "app" / "tools" / "alkhalil" / "AlKhalil1.1" / "src" / "AlKhalil" / "AlKhalil.java"
-    alkhalil_gui_only = False
-    if alkhalil_source.exists():
-        try:
-            source_text = alkhalil_source.read_text(encoding="utf-8", errors="replace")
-            alkhalil_gui_only = "new Gui(" in source_text or "Gui fen = new Gui()" in source_text
-        except Exception:
-            alkhalil_gui_only = False
-
-    if java["status"] != "ok":
+        statuses["alkhalil"] = get_alkhalil_status()
+    except Exception:
+        alkhalil_jar = jar_resolver.resolve()
+        alkhalil_file_exists = alkhalil_jar.exists() and alkhalil_jar.is_file()
         statuses["alkhalil"] = {
-            "status": "missing_java",
-            "reason": "AlKhalil requires Java.",
-            "java": java,
+            "status": "ok" if java["status"] == "ok" and alkhalil_file_exists else ("missing_java" if java["status"] != "ok" else "missing_model"),
+            "reason": (
+                f"AlKhalil JAR detected at {alkhalil_jar}."
+                if alkhalil_file_exists
+                else "AlKhalil JAR not found. Set ALKHALIL_JAR or ensure the jar exists under app/tools/alkhalil/AlKhalil1.1/Alkhalil.jar."
+            ),
             "resolved_jar": str(alkhalil_jar),
             "jar_exists": bool(alkhalil_file_exists),
         }
-    else:
-        if alkhalil_gui_only:
-            statuses["alkhalil"] = {
-                "status": "future_work",
-                "reason": "Bundled AlKhalil build is GUI-only (main() instantiates Gui) and does not expose a CLI analysis entry point.",
-                "resolved_jar": str(alkhalil_jar),
-                "jar_exists": bool(alkhalil_file_exists),
-                "source": str(alkhalil_source),
-            }
-        else:
-            statuses["alkhalil"] = {
-                "status": "ok" if alkhalil_file_exists else "missing_model",
-                "reason": (
-                    f"AlKhalil JAR detected at {alkhalil_jar}."
-                    if alkhalil_file_exists
-                    else "AlKhalil JAR not found. Set ALKHALIL_JAR or ensure the jar exists under app/tools/alkhalil/AlKhalil1.1/Alkhalil.jar."
-                ),
-                "resolved_jar": str(alkhalil_jar),
-                "jar_exists": bool(alkhalil_file_exists),
-            }
 
     statuses["udpipe"] = get_udpipe_status()
 
-    # MADAMIRA is optional: only mark as ok if it's configured + present; otherwise disabled.
     if java["status"] != "ok":
         statuses["madamira"] = {"status": "disabled", "reason": "MADAMIRA requires Java.", "java": java}
     else:
@@ -221,7 +190,6 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
             if madamira_path.get("status") == "ok"
             else {"status": "disabled", "reason": madamira_path.get("reason", "MADAMIRA not configured."), "path": madamira_path.get("path")}
         )
-
 
     statuses["sinatools"] = {
         "status": "future_work",
@@ -235,14 +203,12 @@ def is_available(status: Dict[str, Any]) -> bool:
     return status.get("status") == "ok"
 
 
-
 def safe_analyze(tool: str, analyzer: Callable[[str], Dict[str, Any]], text: str) -> Dict[str, Any]:
     try:
         result = analyzer(text)
         if not isinstance(result, dict):
             return unavailable_result(tool, "Analyzer returned an invalid response.", text)
 
-        # Normalize to unified schema without breaking existing adapters.
         result.setdefault("tool", tool)
         result.setdefault("status", "ok")
         result.setdefault("tokens", [])
@@ -250,7 +216,6 @@ def safe_analyze(tool: str, analyzer: Callable[[str], Dict[str, Any]], text: str
         result.setdefault("pos", [])
         result.setdefault("reason", "")
 
-        # Drop legacy keys if present? Keep them; frontend may ignore.
         return {
             "tool": result.get("tool", tool),
             "status": result.get("status", "ok"),
@@ -262,7 +227,6 @@ def safe_analyze(tool: str, analyzer: Callable[[str], Dict[str, Any]], text: str
     except Exception as exc:
         logger.exception("[%s] safe analyzer failure", tool)
         return unified_result(tool=tool, status="error", tokens=[], lemmas=[], pos=[], reason=str(exc))
-
 
 
 def startup_report_lines(statuses: Dict[str, Dict[str, Any]] | None = None) -> List[str]:

@@ -1,13 +1,19 @@
 from backend.analyzers.base_tool import BaseTool
 
+
 class AlKhalilTool(BaseTool):
     name = "alkhalil"
-    approach = "java-jar"
-    
+    approach = "java-bridge"
+
     def analyze(self, text):
-        return {"tool":"alkhalil","status":"not_implemented","input":text,"word_count":0,"tokens":[]}
-    
-    def is_loaded(self): 
-        return False
+        from app.tools.alkhalil_tool import alkhalil_analyze
+
+        return alkhalil_analyze(text)
+
+    def is_loaded(self):
+        from app.tools.alkhalil_tool import get_alkhalil_status
+
+        return get_alkhalil_status().get("status") == "ok"
+
 
 alkhalil_tool = AlKhalilTool()

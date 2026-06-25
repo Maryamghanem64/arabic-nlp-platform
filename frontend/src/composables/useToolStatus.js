@@ -9,7 +9,7 @@ export function useToolStatus() {
   const error = ref(null)
 
   const activeTools = computed(() =>
-    TOOL_KEYS.filter((tool) => ['ok', 'partial'].includes(toolStatuses.value[tool]?.status)),
+    TOOL_KEYS.filter((tool) => ['ok', 'partial', 'lazy'].includes(toolStatuses.value[tool]?.status)),
   )
 
   function normalizeStatuses(payload) {
@@ -44,6 +44,10 @@ export function useToolStatus() {
     return toolStatuses.value[key]?.reason || toolStatuses.value[key]?.error || ''
   }
 
+  function toolMeta(key) {
+    return toolStatuses.value[key] || { status: 'unknown' }
+  }
+
   onMounted(refresh)
 
   return {
@@ -54,6 +58,7 @@ export function useToolStatus() {
     refresh,
     toolStatus,
     toolReason,
+    toolMeta,
   }
 }
 
