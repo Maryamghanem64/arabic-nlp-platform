@@ -5,9 +5,19 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.utils.constants import FUSION_WEIGHTS, KNOWN_FIXES
 from app.utils.helpers import (
     confidence_bucket,
+    normalize_lemma_for_compare,
     normalize_pos_for_compare,
 )
 from backend.services.comparison_service import build_conflicts
+
+
+_TOOL_RELIABILITY = {
+    "camel": 0.35,
+    "stanza": 0.35,
+    "udpipe": 0.15,
+    "qalsadi": 0.10,
+    "alkhalil": 0.05,
+}
 
 
 def _alignment_match_type(tok: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -69,23 +79,94 @@ def score_pos(camel_pos_raw, stanza_pos_raw, *, partial_match: bool = False) -> 
 
 
 
-def fuse_confidence(camel_score: float, pos_source: str) -> tuple:
-    """Unified confidence metric.
+def _token_value(tok: Optional[Dict[str, Any]], key: str) -> Optional[str]:
+    if not tok:
+        return None
+    value = tok.get(key)
+    if value is not None and str(value).strip():
+        return str(value).strip()
+    analyses = tok.get("analyses") or []
+    if analyses and isinstance(analyses[0], dict):
+        nested = analyses[0].get(key)
+        if nested is not None and str(nested).strip():
+            return str(nested).strip()
+    return None
 
-    Confidence is derived per token from the selected POS provenance only.
-    This avoids leaking any sentence-level penalty across tokens.
-    """
-    _ = camel_score
-    confidence_map = {
-        "agreement": 1.0,
-        "partial_match": 0.9,
-        "camel_scored": 0.8,
-        "stanza_scored": 0.8,
-        "camel_only": 0.7,
-        "stanza_only": 0.7,
-        "none": 0.4,
-    }
-    final = round(confidence_map.get(pos_source, 0.6), 3)
+
+def _support_score(
+    *,
+    chosen_value: Optional[str],
+    values_by_tool: Dict[str, Optional[str]],
+    normalizer,
+) -> float:
+    if not chosen_value:
+        return 0.0
+
+    normalized_chosen = normalizer(chosen_value) if normalizer else str(chosen_value).strip()
+    if not normalized_chosen or normalized_chosen == "X":
+        return 0.0
+
+    valid_weight = 0.0
+    support_weight = 0.0
+
+    for tool_name, raw_value in values_by_tool.items():
+        if raw_value is None:
+            continue
+        normalized_value = normalizer(raw_value) if normalizer else str(raw_value).strip()
+        if not normalized_value or normalized_value == "X":
+            continue
+
+        weight = float(_TOOL_RELIABILITY.get(tool_name, 0.0))
+        if weight <= 0:
+            continue
+
+        valid_weight += weight
+        if normalized_value == normalized_chosen:
+            support_weight += weight
+
+    if valid_weight <= 0:
+        return 0.0
+
+    total_possible_weight = sum(_TOOL_RELIABILITY.values())
+    agreement_strength = support_weight / valid_weight
+    reliability = valid_weight / total_possible_weight
+    conflict_penalty = max(0.0, (valid_weight - support_weight) / total_possible_weight) * 0.35
+    missing_penalty = max(0.0, total_possible_weight - valid_weight) / total_possible_weight * 0.25
+
+    score = 0.1 + (0.55 * agreement_strength) + (0.35 * reliability) - conflict_penalty - missing_penalty
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_tok=None, qalsadi_tok=None, alkhalil_tok=None, udpipe_tok=None) -> tuple[float, str]:
+    pos_score = _support_score(
+        chosen_value=fused.get("final", {}).get("pos"),
+        values_by_tool={
+            "camel": _token_value(camel_tok, "pos") or _token_value(camel_tok, "upos"),
+            "stanza": _token_value(stanza_tok, "pos") or _token_value(stanza_tok, "upos"),
+            "qalsadi": _token_value(qalsadi_tok, "pos") or _token_value(qalsadi_tok, "upos"),
+            "alkhalil": _token_value(alkhalil_tok, "pos") or _token_value(alkhalil_tok, "upos"),
+            "udpipe": _token_value(udpipe_tok, "pos") or _token_value(udpipe_tok, "upos"),
+        },
+        normalizer=normalize_pos_for_compare,
+    )
+
+    lemma_score = _support_score(
+        chosen_value=fused.get("final", {}).get("lemma"),
+        values_by_tool={
+            "camel": _token_value(camel_tok, "lemma"),
+            "stanza": _token_value(stanza_tok, "lemma"),
+            "qalsadi": _token_value(qalsadi_tok, "lemma"),
+            "alkhalil": _token_value(alkhalil_tok, "lemma"),
+            "udpipe": _token_value(udpipe_tok, "lemma"),
+        },
+        normalizer=normalize_lemma_for_compare,
+    )
+
+    scores = [score for score in (pos_score, lemma_score) if score > 0]
+    if not scores:
+        return 0.0, confidence_bucket(0.0)
+
+    final = round(sum(scores) / len(scores), 3)
     return final, confidence_bucket(final)
 
 
@@ -225,16 +306,18 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
         fused["final"]["dependency"] = udpipe_tok["dependency"]
         fused["sources"]["dependency"] = "udpipe"
 
-    raw_conf = camel_analyses[0].get("confidence", 0.5) if camel_analyses else 0.5
-    conf_score, conf_level = fuse_confidence(raw_conf, pos_source)
+    conf_score, conf_level = compute_token_confidence(
+        fused,
+        camel_tok=camel_tok,
+        stanza_tok=stanza_tok,
+        qalsadi_tok=qalsadi_tok,
+        alkhalil_tok=alkhalil_tok,
+        udpipe_tok=udpipe_tok,
+    )
     udpipe_pos_raw = udpipe_tok.get("pos") or udpipe_tok.get("upos") if udpipe_tok else None
     if final_pos and udpipe_pos_raw and normalize_pos_for_compare(udpipe_pos_raw) == final_pos:
-        conf_score = round(min(1.0, conf_score + 0.05), 3)
-        conf_level = confidence_bucket(conf_score)
         fused["notes"].append("UDPipe confirms POS")
     if stanza_case and udpipe_case and str(stanza_case).strip().lower() == str(udpipe_case).strip().lower():
-        conf_score = round(min(1.0, conf_score + 0.03), 3)
-        conf_level = confidence_bucket(conf_score)
         fused["notes"].append("UDPipe confirms case")
     fused["final"]["confidence_score"] = conf_score
     fused["final"]["confidence_level"] = conf_level

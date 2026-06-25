@@ -12,6 +12,13 @@ from app.utils.helpers import (
 )
 
 _NON_CONTENT_POS = {"CCONJ", "SCONJ", "PART", "PUNCT", "SYM"}
+_TOOL_RELIABILITY = {
+    "camel": 0.35,
+    "stanza": 0.35,
+    "udpipe": 0.15,
+    "qalsadi": 0.10,
+    "alkhalil": 0.05,
+}
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,38 @@ def _preferred_pos(tok: Optional[Dict[str, Any]]) -> Optional[str]:
         if candidate not in _NON_CONTENT_POS and candidate != "X":
             return candidate
     return candidates[0]
+
+
+def _weighted_majority_ratio(values_by_tool: Dict[str, Optional[str]], *, normalize: Optional[Any] = None) -> tuple[float, float, int]:
+    counts: Dict[str, float] = {}
+    total_weight = 0.0
+
+    for tool_name, value in values_by_tool.items():
+        if value is None:
+            continue
+
+        text = str(value).strip()
+        if not text:
+            continue
+
+        if normalize is not None:
+            text = normalize(text)
+
+        if not text or text == "X":
+            continue
+
+        weight = float(_TOOL_RELIABILITY.get(tool_name, 0.0))
+        if weight <= 0:
+            continue
+
+        counts[text] = counts.get(text, 0.0) + weight
+        total_weight += weight
+
+    if total_weight <= 0:
+        return 0.0, 0.0, 0
+
+    majority = max(counts.values()) if counts else 0.0
+    return majority / total_weight, majority, 1
 
 
 def _preferred_lemma(tok: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -236,10 +275,14 @@ def compute_agreements(
     def extract_pos(t: Optional[Dict[str, Any]]) -> Optional[str]:
         return _preferred_pos(t)
 
-    pos_agree = 0
-    lemma_agree = 0
+    pos_agree_sum = 0.0
+    lemma_exact_agree_sum = 0.0
+    lemma_norm_agree_sum = 0.0
     root_agree = 0
     seg_agree = 0
+    pos_total = 0
+    lemma_exact_total = 0
+    lemma_norm_total = 0
     total = 0
 
     for atok in aligned_tokens:
@@ -256,30 +299,46 @@ def compute_agreements(
         if not ref:
             continue
 
-        ref_pos = normalize_pos_for_compare(extract_pos(ref))
+        pos_ratio, _pos_majority, pos_weight = _weighted_majority_ratio(
+            {
+                "camel": extract_pos(camel),
+                "stanza": extract_pos(stanza),
+                "qalsadi": extract_pos(qalsadi),
+                "alkhalil": extract_pos(alkhalil),
+                "udpipe": extract_pos(udpipe),
+            },
+            normalize=normalize_pos_for_compare,
+        )
+        if pos_weight:
+            pos_agree_sum += pos_ratio
+            pos_total += 1
 
-        tool_pos_vals = [
-            normalize_pos_for_compare(extract_pos(t))
-            for t in (camel, stanza, qalsadi, alkhalil, udpipe)
-            if t and extract_pos(t)
-        ]
+        lemma_exact_ratio, _lemma_exact_majority, lemma_exact_weight = _weighted_majority_ratio(
+            {
+                "camel": _extract_lemma(camel),
+                "stanza": _extract_lemma(stanza),
+                "qalsadi": _extract_lemma(qalsadi),
+                "alkhalil": _extract_lemma(alkhalil),
+                "udpipe": _extract_lemma(udpipe),
+            },
+        )
+        lemma_norm_ratio, _lemma_norm_majority, lemma_norm_weight = _weighted_majority_ratio(
+            {
+                "camel": _extract_lemma(camel),
+                "stanza": _extract_lemma(stanza),
+                "qalsadi": _extract_lemma(qalsadi),
+                "alkhalil": _extract_lemma(alkhalil),
+                "udpipe": _extract_lemma(udpipe),
+            },
+            normalize=normalize_lemma_for_compare,
+        )
 
-        if tool_pos_vals and all(v == ref_pos for v in tool_pos_vals):
-            pos_agree += 1
-
-        ref_lemma = _extract_lemma(ref)
-        lemma_vals = [
-            _extract_lemma(t)
-            for t in (camel, stanza, qalsadi, alkhalil, udpipe)
-            if _extract_lemma(t)
-        ]
-
-        if lemma_vals and ref_lemma:
-            norm_ref = normalize_lemma_for_compare(ref_lemma)
-            if all(normalize_lemma_for_compare(v) == norm_ref for v in lemma_vals):
-                lemma_agree += 1
-            elif all(is_mwt_clitic_artifact(v) or is_gender_convention_pair(v, ref_lemma) for v in lemma_vals):
-                lemma_agree += 1
+        if lemma_exact_weight:
+            lemma_exact_agree_sum += lemma_exact_ratio
+            lemma_exact_total += 1
+        if lemma_norm_weight:
+            lemma_norm_agree_sum += lemma_norm_ratio
+            lemma_norm_total += 1
 
 
 
@@ -303,10 +362,15 @@ def compute_agreements(
     def pct(n: int) -> int:
         return int(round((n / total * 100) if total else 0))
 
+    def weighted_pct(sum_ratio: float, count: int) -> int:
+        return int(round((sum_ratio / count * 100) if count else 0))
+
     return {
         "token_count": total,
-        "pos_agreement": pct(pos_agree),
-        "lemma_agreement": pct(lemma_agree),
+        "pos_agreement": weighted_pct(pos_agree_sum, pos_total),
+        "lemma_agreement": weighted_pct(lemma_norm_agree_sum, lemma_norm_total),
+        "lemma_exact_agreement": weighted_pct(lemma_exact_agree_sum, lemma_exact_total),
+        "lemma_normalized_agreement": weighted_pct(lemma_norm_agree_sum, lemma_norm_total),
         "root_agreement": pct(root_agree),
         "segmentation_agreement": pct(seg_agree),
     }

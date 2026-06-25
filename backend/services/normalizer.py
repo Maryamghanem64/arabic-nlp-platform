@@ -124,6 +124,64 @@ def _pos_standardize(pos: Optional[str]) -> Optional[str]:
     return "X"
 
 
+def _normalize_pos_text(pos: Optional[str]) -> Optional[str]:
+    if not pos:
+        return None
+    text = str(pos).strip()
+    if not text:
+        return None
+    return text.replace("ـ", "").replace("ﻻ", "لا")
+
+
+def normalize_alkhalil_pos(pos: Optional[str]) -> Optional[str]:
+    """Map AlKhalil grammatical descriptions to Universal POS."""
+    text = _normalize_pos_text(pos)
+    if not text:
+        return None
+
+    lowered = text.lower()
+    compact = lowered.replace(" ", "")
+
+    direct_map = {
+        "فعل": "VERB",
+        "ماض": "VERB",
+        "مضارع": "VERB",
+        "أمر": "VERB",
+        "امر": "VERB",
+        "اسم": "NOUN",
+        "فاعل": "NOUN",
+        "مفعول": "NOUN",
+        "مصدر": "NOUN",
+        "صفة": "ADJ",
+        "مشبه": "ADJ",
+        "منسوب": "ADJ",
+        "ظرف": "ADV",
+        "حرف جر": "ADP",
+        "حرف عطف": "CCONJ",
+        "ضمير": "PRON",
+    }
+    for needle, mapped in direct_map.items():
+        if needle in text:
+            return mapped
+
+    if any(needle in compact for needle in ("فعل", "ماض", "مضارع", "امر", "past", "present", "imperative")):
+        return "VERB"
+    if any(needle in compact for needle in ("اسم", "فاعل", "مفعول", "مصدر", "noun")):
+        return "NOUN"
+    if any(needle in compact for needle in ("صفة", "مشبه", "منسوب", "adjective")):
+        return "ADJ"
+    if "ظرف" in compact or "adverb" in compact:
+        return "ADV"
+    if "حرفجر" in compact or "adposition" in compact:
+        return "ADP"
+    if "حرفعطف" in compact or "conjunction" in compact:
+        return "CCONJ"
+    if "ضمير" in compact or "pronoun" in compact:
+        return "PRON"
+
+    return _pos_standardize(text)
+
+
 
 def _confidence(score: Optional[float]) -> Dict[str, Any]:
     score_f = float(score) if score is not None else 0.0
@@ -485,7 +543,7 @@ def normalize_tool_output(tool_name: str, raw_result: Dict[str, Any]) -> Dict[st
                 surface = tok.get("surface")
                 lemma = tok.get("lemma")
                 root = tok.get("root")
-                pos = _pos_standardize(tok.get("upos") or tok.get("pos"))
+                pos = normalize_alkhalil_pos(tok.get("upos") or tok.get("pos"))
                 gloss = tok.get("gloss")
                 original_surface = tok.get("original_surface")
                 normalized_flag = bool(tok.get("normalized"))

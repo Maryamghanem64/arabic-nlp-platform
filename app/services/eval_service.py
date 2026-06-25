@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.utils.helpers import classify_conflict, normalize_pos_for_compare, strip_diacritics
+from app.utils.helpers import classify_conflict, normalize_lemma_for_compare, normalize_pos_for_compare
 from backend.services.alignment_engine import align_tools, compute_agreements
 
 
@@ -90,7 +90,8 @@ def evaluate_tools(
     agreements = compute_agreements(aligned_tokens=aligned_tokens)
 
     pos_agreement = (agreements.get("pos_agreement", 0) / 100) if total else 0
-    lemma_match = (agreements.get("lemma_agreement", 0) / 100) if total else 0
+    lemma_exact = (agreements.get("lemma_exact_agreement", 0) / 100) if total else 0
+    lemma_normalized = (agreements.get("lemma_normalized_agreement", agreements.get("lemma_agreement", 0)) / 100) if total else 0
 
     pos_precision = pos_recall = pos_f1 = round(pos_agreement, 3)
 
@@ -117,14 +118,14 @@ def evaluate_tools(
 
         if camel_ana and stanza_tok:
             camel_pos = normalize_pos_for_compare(camel_ana.get("pos"))
-            stanza_pos = str(stanza_tok.get("upos", "")).upper() if stanza_tok.get("upos") else ""
+            stanza_pos = normalize_pos_for_compare(stanza_tok.get("upos") or stanza_tok.get("pos"))
 
-            if camel_pos and stanza_pos and camel_pos != stanza_pos:
+            if camel_pos and stanza_pos and camel_pos != "X" and stanza_pos != "X" and camel_pos != stanza_pos:
                 conflicts.append({"word": w, "camel_pos": camel_pos, "stanza_pos": stanza_pos})
                 all_conflicts.append(classify_conflict("pos", camel_pos, stanza_pos))
 
-            c_lemma = strip_diacritics(camel_ana.get("lemma"))
-            s_lemma = strip_diacritics(stanza_tok.get("lemma"))
+            c_lemma = normalize_lemma_for_compare(camel_ana.get("lemma"))
+            s_lemma = normalize_lemma_for_compare(stanza_tok.get("lemma"))
             if c_lemma and s_lemma and c_lemma != s_lemma:
                 all_conflicts.append(classify_conflict("lemma", c_lemma, s_lemma))
 
@@ -135,8 +136,12 @@ def evaluate_tools(
         "pos_precision": pos_precision,
         "pos_recall": pos_recall,
         "pos_f1": pos_f1,
-        "lemma_match": round(lemma_match, 2) if total else 0,
-        "lemma_match_pct": f"{round(lemma_match * 100, 1)}%" if total else "0%",
+        "lemma_match": round(lemma_normalized, 2) if total else 0,
+        "lemma_match_pct": f"{round(lemma_normalized * 100, 1)}%" if total else "0%",
+        "lemma_exact_match": round(lemma_exact, 2) if total else 0,
+        "lemma_exact_match_pct": f"{round(lemma_exact * 100, 1)}%" if total else "0%",
+        "lemma_normalized_match": round(lemma_normalized, 2) if total else 0,
+        "lemma_normalized_match_pct": f"{round(lemma_normalized * 100, 1)}%" if total else "0%",
         "segmentation_coverage": round(seg_cov / total, 2) if total else 0,
         "pos_conflicts": conflicts,
         "all_conflicts": all_conflicts,
@@ -155,6 +160,10 @@ def evaluate_tools(
         result["pos_f1"] = 0
         result["lemma_match"] = 0
         result["lemma_match_pct"] = "0%"
+        result["lemma_exact_match"] = 0
+        result["lemma_exact_match_pct"] = "0%"
+        result["lemma_normalized_match"] = 0
+        result["lemma_normalized_match_pct"] = "0%"
         result["segmentation_coverage"] = 0
         result["pos_conflicts"] = []
         result["all_conflicts"] = []
