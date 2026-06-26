@@ -1,7 +1,10 @@
+import { TOOL_COLORS } from '@/constants/designTokens'
+
 export const TOOL_CONFIG = {
   camel: {
     label: 'CAMeL Tools',
-    color: '#2E5FA3',
+    color: TOOL_COLORS.camel.border,
+    group: TOOL_COLORS.camel.group,
     type: 'Hybrid Rule + Neural',
     license: 'MIT',
     features: ['Lemma', 'Root', 'POS', 'Morphology', 'Gloss'],
@@ -10,7 +13,8 @@ export const TOOL_CONFIG = {
   },
   farasa: {
     label: 'Farasa',
-    color: '#6C3483',
+    color: TOOL_COLORS.farasa.border,
+    group: TOOL_COLORS.farasa.group,
     type: 'Statistical (SVM-rank)',
     license: 'Free (research)',
     features: ['Segmentation', 'Diacritization'],
@@ -19,7 +23,8 @@ export const TOOL_CONFIG = {
   },
   stanza: {
     label: 'Stanza',
-    color: '#1E8449',
+    color: TOOL_COLORS.stanza.border,
+    group: TOOL_COLORS.stanza.group,
     type: 'Neural (BiLSTM)',
     license: 'Apache 2.0',
     features: ['POS', 'Lemma', 'Dependency', 'Case'],
@@ -28,7 +33,8 @@ export const TOOL_CONFIG = {
   },
   qalsadi: {
     label: 'Qalsadi',
-    color: '#D35400',
+    color: TOOL_COLORS.qalsadi.border,
+    group: TOOL_COLORS.qalsadi.group,
     type: 'Rule-based morphological',
     license: 'LGPL',
     features: ['Lemma', 'Stem'],
@@ -37,7 +43,8 @@ export const TOOL_CONFIG = {
   },
   arabert: {
     label: 'AraBERT',
-    color: '#7D3C98',
+    color: TOOL_COLORS.camel.border,
+    group: TOOL_COLORS.camel.group,
     type: 'Neural (BERT)',
     license: 'Apache 2.0',
     features: ['POS', 'NER', 'Contextual embeddings'],
@@ -46,7 +53,8 @@ export const TOOL_CONFIG = {
   },
   alkhalil: {
     label: 'AlKhalil',
-    color: '#1A5276',
+    color: TOOL_COLORS.alkhalil.border,
+    group: TOOL_COLORS.alkhalil.group,
     type: 'Rule-based',
     license: 'Free (research)',
     features: ['Root extraction', 'Full morphology'],
@@ -55,7 +63,8 @@ export const TOOL_CONFIG = {
   },
   udpipe: {
     label: 'UDPipe 2',
-    color: '#117A65',
+    color: TOOL_COLORS.udpipe.border,
+    group: TOOL_COLORS.udpipe.group,
     type: 'Neural (transition-based)',
     license: 'MPL 2.0',
     features: ['POS', 'Dependency parsing', 'Lemma'],
@@ -64,7 +73,8 @@ export const TOOL_CONFIG = {
   },
   madamira: {
     label: 'MADAMIRA',
-    color: '#784212',
+    color: TOOL_COLORS.farasa.border,
+    group: TOOL_COLORS.farasa.group,
     type: 'Statistical + Rule-based',
     license: 'LDC (research)',
     features: ['Full morphology', 'Diacritization', 'POS'],
@@ -73,7 +83,8 @@ export const TOOL_CONFIG = {
   },
   sinatools: {
     label: 'SinaTools / Alma',
-    color: '#B7950B',
+    color: TOOL_COLORS.farasa.border,
+    group: TOOL_COLORS.farasa.group,
     type: 'Frequency + BERT',
     license: 'MIT',
     features: ['Lemmatization', 'POS tagging', 'NER', 'Word Sense Disambiguation'],

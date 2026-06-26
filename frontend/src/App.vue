@@ -1,23 +1,27 @@
 <template>
-  <div class="app-shell">
-    <header class="topbar">
-      <RouterLink to="/" class="brand" aria-label="Arabic NLP platform home">
-        <span class="brand-mark">ع</span>
-        <span class="brand-copy">
-          <strong>Arabic NLP Lab</strong>
-          <small>Comparative Research Platform</small>
-        </span>
-      </RouterLink>
+  <div id="app" class="platform-shell">
+    <header class="platform-header">
+      <div class="header-inner">
+        <RouterLink to="/" class="header-brand" aria-label="Comparative Arabic NLP Platform home">
+          <span class="brand-icon">A</span>
+          <div>
+            <div class="brand-title">Comparative Arabic NLP Platform</div>
+            <div class="brand-sub">Unified analysis, comparison, fusion, and evaluation</div>
+          </div>
+        </RouterLink>
 
-      <nav class="nav-links" aria-label="Primary navigation">
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink to="/compare">Compare</RouterLink>
-        <RouterLink to="/analyze">Analyze</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
-      </nav>
+        <nav class="header-nav" aria-label="Primary navigation">
+          <RouterLink to="/" class="nav-item">Dashboard</RouterLink>
+          <RouterLink to="/analyze" class="nav-item">Analyze</RouterLink>
+          <RouterLink to="/smart" class="nav-item nav-item--featured">Fusion</RouterLink>
+          <RouterLink to="/compare" class="nav-item">Compare</RouterLink>
+          <RouterLink to="/evaluate" class="nav-item">Evaluation</RouterLink>
+          <RouterLink to="/reports" class="nav-item">Reports</RouterLink>
+        </nav>
+      </div>
     </header>
 
-    <main>
+    <main class="platform-main">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
@@ -25,10 +29,10 @@
       </router-view>
     </main>
 
-    <footer class="footer">
+    <footer class="platform-footer">
       <div>
-        <strong>Arabic NLP Comparative Platform v8.3</strong>
-        <span>CAMeL, Farasa, Stanza, Qalsadi, AraBERT, and SinaTools evidence workspace.</span>
+        <strong>Comparative Arabic NLP Platform</strong>
+        <span>CAMeL, Farasa, Stanza, Qalsadi, UDPipe, and AlKhalil workbench.</span>
       </div>
       <span class="footer-tag">Research dashboard</span>
     </footer>
@@ -36,128 +40,152 @@
 </template>
 
 <style>
-.app-shell {
+.platform-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-.topbar {
+.platform-header {
   position: sticky;
   top: 0;
-  z-index: 50;
-  min-height: 72px;
+  z-index: 100;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
+  background: rgba(7, 15, 30, 0.72);
+  backdrop-filter: blur(18px);
+}
+
+.header-inner {
+  width: min(1360px, calc(100% - 32px));
+  min-height: 76px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 12px 30px;
-  border-bottom: 1px solid rgba(220, 228, 239, 0.86);
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(18px);
 }
 
-.brand {
+.header-brand {
   min-width: 260px;
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  color: var(--ink);
+  color: #fff;
   text-decoration: none;
 }
 
-.brand-mark {
-  width: 42px;
-  height: 42px;
+.brand-icon {
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 14px;
   color: white;
-  background: linear-gradient(135deg, var(--navy), var(--cyan));
-  box-shadow: 0 10px 24px rgba(22, 54, 92, 0.24);
-  font-family: "Noto Naskh Arabic", "Traditional Arabic", serif;
-  font-size: 25px;
-  font-weight: 900;
+  background: linear-gradient(135deg, var(--cyan), var(--c-accent));
+  box-shadow: 0 12px 28px rgba(22, 54, 92, 0.28);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
-.brand-copy strong,
-.brand-copy small {
+.brand-title,
+.brand-sub {
   display: block;
   line-height: 1.15;
 }
 
-.brand-copy strong {
+.brand-title {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 600;
 }
 
-.brand-copy small {
+.brand-sub {
   margin-top: 3px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.64);
   font-size: 12px;
-  font-weight: 700;
 }
 
-.nav-links {
+.header-nav {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #eef3f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 12px 30px rgba(5, 15, 30, 0.18);
 }
 
-.nav-links a {
+.nav-item {
   min-width: 88px;
   min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
-  color: #556173;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.76);
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 500;
   text-decoration: none;
 }
 
-.nav-links a.router-link-active {
-  color: var(--navy);
-  background: white;
-  box-shadow: 0 1px 7px rgba(23, 32, 51, 0.09);
+.nav-item:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
-main {
+.nav-item.router-link-active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.nav-item--featured {
+  color: #111827;
+  background: linear-gradient(135deg, #E0E7FF, #D1FAE5);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-weight: 600;
+}
+
+.nav-item--featured.router-link-active {
+  color: #111827;
+  background: linear-gradient(135deg, #E0E7FF, #D1FAE5);
+}
+
+.platform-main {
   flex: 1;
+  width: min(1360px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 68px;
 }
 
-.footer {
+.platform-footer {
   display: flex;
   justify-content: space-between;
   gap: 20px;
   padding: 26px 30px;
-  color: #d7dee8;
+  color: rgba(255, 255, 255, 0.88);
   background:
-    linear-gradient(135deg, #101827, #13243a),
-    radial-gradient(circle at 88% 20%, rgba(37, 99, 235, 0.26), transparent 28%);
+    linear-gradient(135deg, #08111f, #0f172a 55%, #111f38),
+    radial-gradient(circle at 88% 20%, rgba(79, 70, 229, 0.26), transparent 28%);
 }
 
-.footer div {
+.platform-footer div {
   display: grid;
   gap: 4px;
 }
 
-.footer strong {
-  font-weight: 900;
+.platform-footer strong {
+  font-weight: 600;
 }
 
-.footer span {
-  color: #9eadbd;
+.platform-footer span {
+  color: rgba(255, 255, 255, 0.68);
   font-size: 13px;
 }
 
 .footer-tag {
   white-space: nowrap;
+  color: rgba(255, 255, 255, 0.86);
 }
 
 .page-enter-active,
@@ -171,26 +199,33 @@ main {
   transform: translateY(8px);
 }
 
-@media (max-width: 820px) {
-  .topbar {
+@media (max-width: 980px) {
+  .header-inner {
     align-items: stretch;
     flex-direction: column;
-    padding: 14px;
+    padding: 14px 0;
   }
 
-  .brand {
+  .header-brand {
     min-width: 0;
   }
 
-  .nav-links {
+  .header-nav {
     overflow-x: auto;
   }
 
-  .nav-links a {
-    min-width: 78px;
+  .nav-item {
+    min-width: 80px;
+  }
+}
+
+@media (max-width: 820px) {
+  .platform-main {
+    width: min(100% - 24px, 1360px);
+    padding-top: 22px;
   }
 
-  .footer {
+  .platform-footer {
     flex-direction: column;
   }
 }

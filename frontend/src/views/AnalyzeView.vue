@@ -28,7 +28,7 @@
         class="textarea arabic"
         dir="rtl"
         lang="ar"
-        placeholder="اكتب النص العربي هنا..."
+        placeholder="Enter Arabic text here..."
       ></textarea>
 
       <div class="run-row">
@@ -57,7 +57,7 @@
           type="button"
           @click="selectTool('all')"
         >
-          <span class="selector-dot" :style="{ backgroundColor: '#0f172a' }"></span>
+          <span class="selector-dot selector-dot--neutral"></span>
           <div class="selector-copy">
             <span class="selector-label">All tools</span>
             <span class="selector-subtitle">Combined analysis</span>
@@ -104,9 +104,8 @@
 
     <div v-if="loading" class="loading-state analysis-loading">
       <div class="loading-stack">
-        <span class="skeleton"></span>
-        <span class="skeleton wide"></span>
-        <span class="skeleton short"></span>
+        <span class="spinner--dark" aria-hidden="true"></span>
+        <span>Loading analysis...</span>
       </div>
     </div>
 
@@ -128,7 +127,7 @@
 
         <div v-if="activeTab === 'results'" class="tab-panel">
           <div v-if="selectedTool === 'all'" class="results-grid">
-            <article v-for="tool in toolOptions" :key="tool.key" class="tool-result-card">
+            <article v-for="tool in toolOptions" :key="tool.key" class="section-card tool-result-card">
               <div class="tool-result-head" :style="{ borderTopColor: tool.color }">
                 <div class="tool-result-title">
                   <span class="tool-result-bar" :style="{ backgroundColor: tool.color }"></span>
@@ -172,7 +171,7 @@
             </article>
           </div>
 
-          <article v-else class="panel panel-pad single-result-card">
+          <article v-else class="section-card single-result-card">
             <div class="tool-result-head" :style="{ borderTopColor: selectedToolMeta.color }">
               <div class="tool-result-title">
                 <span class="tool-result-bar" :style="{ backgroundColor: selectedToolMeta.color }"></span>
@@ -241,10 +240,22 @@
               <tbody>
                 <tr v-for="row in fusionRows" :key="`${row.word}-${row.index}`">
                   <td class="arabic" dir="rtl" lang="ar">{{ row.word }}</td>
-                  <td>{{ displayTokenValue('lemma', row.final.lemma) }}</td>
-                  <td>{{ displayTokenValue('root', row.final.root) }}</td>
-                  <td>{{ displayTokenValue('pos', row.final.pos) }}</td>
-                  <td>{{ displayTokenValue('segmentation', row.final.segmentation) }}</td>
+                  <td>
+                    <span v-if="hasTokenValue(row.final.lemma)" class="arabic-value">{{ displayTokenValue('lemma', row.final.lemma) }}</span>
+                    <EmptyCell v-else />
+                  </td>
+                  <td>
+                    <span v-if="hasTokenValue(row.final.root)" class="arabic-value">{{ displayTokenValue('root', row.final.root) }}</span>
+                    <EmptyCell v-else />
+                  </td>
+                  <td>
+                    <span v-if="hasTokenValue(row.final.pos)" class="ltr-value">{{ displayTokenValue('pos', row.final.pos) }}</span>
+                    <EmptyCell v-else />
+                  </td>
+                  <td>
+                    <span v-if="hasTokenValue(row.final.segmentation)" class="arabic-value">{{ displayTokenValue('segmentation', row.final.segmentation) }}</span>
+                    <EmptyCell v-else />
+                  </td>
                   <td><span :class="['pill', confidencePill(row.final.confidence_level)]">{{ row.final.confidence_level || 'low' }}</span></td>
                   <td>
                     <div class="chip-row">
@@ -302,6 +313,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import EmptyCell from '../components/EmptyCell.vue'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
@@ -336,7 +348,7 @@ const toolOptions = computed(() =>
 )
 const toolStatusesLoaded = computed(() => Object.keys(toolStatuses.value).length > 0)
 const tokenEstimate = computed(() => (inputText.value.trim() ? inputText.value.trim().split(/\s+/).length : 0))
-const selectedToolMeta = computed(() => TOOL_CONFIG[selectedTool.value] || { label: 'All tools', color: '#0f172a', type: 'Combined analysis' })
+const selectedToolMeta = computed(() => TOOL_CONFIG[selectedTool.value] || { label: 'All tools', color: 'var(--c-text-primary)', type: 'Combined analysis' })
 const hasResults = computed(() => Boolean(rawResults.value || fusionPayload.value))
 const jsonExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'json') : '#'))
 const csvExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'csv') : '#'))
@@ -452,22 +464,37 @@ function toolColumns(toolKey) {
 }
 
 function normalizeFusionRows(payload) {
-  const rows = Array.isArray(payload?.fusion)
-    ? payload.fusion
-    : Array.isArray(payload?.fusion_result?.fusion)
-      ? payload.fusion_result.fusion
-      : Array.isArray(payload?.result)
-        ? payload.result
-        : []
+  if (!payload) return []
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.fusion)
+      ? payload.fusion
+      : Array.isArray(payload?.fusion_result?.fusion)
+        ? payload.fusion_result.fusion
+        : Array.isArray(payload?.result)
+          ? payload.result
+          : []
 
   return rows.map((row, index) => ({
     index,
-    word: row?.word || row?.surface || `#${index + 1}`,
-    final: row?.final || {},
-    sources: row?.sources || {},
+    word: row?.word || row?.surface || row?.token || `#${index + 1}`,
+    final: normalizeFinal(row),
+    sources: row?.sources || row?.fusion?.chosen_sources || {},
     conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
     notes: Array.isArray(row?.notes) ? row.notes : [],
+    decision_trace: Array.isArray(row?.decision_trace) ? row.decision_trace : [],
   }))
+}
+
+function normalizeFinal(row) {
+  const final = { ...(row?.final || {}) }
+  const legacyFusion = row?.fusion || {}
+  if (!final.pos && legacyFusion.final_pos) final.pos = legacyFusion.final_pos
+  if (!final.lemma && legacyFusion.final_lemma) final.lemma = legacyFusion.final_lemma
+  if (!final.segmentation && legacyFusion.final_segmentation) final.segmentation = legacyFusion.final_segmentation
+  if (!final.confidence_level && legacyFusion.confidence_level) final.confidence_level = legacyFusion.confidence_level
+  if (final.confidence_score === undefined && legacyFusion.confidence !== undefined) final.confidence_score = legacyFusion.confidence
+  return final
 }
 
 function toolPayloadForKey(toolKey) {
@@ -480,7 +507,7 @@ function toolPayloadForKey(toolKey) {
 function fusionSourceChips(sources) {
   return Object.entries(sources || {}).map(([feature, tool]) => ({
     label: `${feature}: ${TOOL_CONFIG[tool]?.label || tool}`,
-    color: TOOL_CONFIG[tool]?.color || '#64748b',
+    color: TOOL_CONFIG[tool]?.color || 'var(--c-text-secondary)',
   }))
 }
 
@@ -556,7 +583,7 @@ function isArabicField(field) {
 }
 
 function formatCellValue(field, value) {
-  if (value === null || value === undefined || value === '') return missingFieldLabel(field)
+  if (!hasTokenValue(value)) return missingFieldLabel(field)
   if (Array.isArray(value)) return value.join(' + ')
 
   if (field === 'segmentation') {
@@ -569,7 +596,7 @@ function formatCellValue(field, value) {
 }
 
 function cellClass(field, value) {
-  return value === null || value === undefined || value === ''
+  return !hasTokenValue(value)
     ? 'field-value muted not-recognized'
     : isArabicField(field)
       ? 'field-value arabic'
@@ -623,24 +650,29 @@ function severityPill(value) {
 }
 
 function missingFieldLabel(field) {
-  if (['lemma', 'root', 'pos', 'gloss'].includes(field)) return 'لم يتم التعرف'
-  if (['segmentation', 'dependency'].includes(field)) return 'لا توجد بيانات'
-  return 'لا توجد بيانات'
+  if (['lemma', 'root', 'pos', 'gloss'].includes(field)) return 'Not recognized'
+  if (['segmentation', 'dependency'].includes(field)) return 'No data available'
+  return 'No data available'
 }
 
 function displayTokenValue(field, value) {
   if (Array.isArray(value)) {
     return value.length ? value.join(' + ') : missingFieldLabel(field)
   }
-  if (value === null || value === undefined || value === '') {
+  if (!hasTokenValue(value)) {
     return missingFieldLabel(field)
   }
   return String(value)
 }
 
 function displayConflictValue(value) {
-  if (value === null || value === undefined || value === '') return 'Not recognized'
+  if (!hasTokenValue(value)) return 'Not recognized'
   return String(value)
+}
+
+function hasTokenValue(value) {
+  if (Array.isArray(value)) return value.length > 0
+  return value !== null && value !== undefined && value !== '' && value !== 'null'
 }
 
 function metricPercent(value) {
@@ -725,7 +757,7 @@ onMounted(async () => {
 .copy-note {
   color: var(--green);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 500;
 }
 
 .selector-panel {
@@ -744,8 +776,8 @@ onMounted(async () => {
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fbfdff;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
   text-align: left;
   cursor: pointer;
   transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
@@ -754,13 +786,13 @@ onMounted(async () => {
 .selector-card:hover,
 .selector-card.active {
   transform: translateY(-2px);
-  border-color: rgba(37, 99, 235, 0.38);
+  border-color: var(--c-accent-border);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
 }
 
 .selector-card.all-tools {
   grid-column: 1 / -1;
-  background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%);
+  background: linear-gradient(135deg, var(--c-page-bg) 0%, var(--c-accent-light) 100%);
 }
 
 .selector-dot {
@@ -769,6 +801,10 @@ onMounted(async () => {
   margin-top: 4px;
   border-radius: 999px;
   flex: 0 0 auto;
+}
+
+.selector-dot--neutral {
+  background: var(--c-text-primary);
 }
 
 .selector-copy {
@@ -784,15 +820,15 @@ onMounted(async () => {
 }
 
 .selector-label {
-  color: var(--navy);
+  color: var(--c-text-primary);
   font-size: 15px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .selector-subtitle {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .selection-notice {
@@ -804,15 +840,15 @@ onMounted(async () => {
 }
 
 .selection-notice.info {
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border: 1px solid var(--c-accent-border);
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
 }
 
 .selection-notice.warn {
-  border: 1px solid #fcd34d;
-  background: #fffbeb;
-  color: #92400e;
+  border: 1px solid var(--c-conf-med-border);
+  background: var(--c-conf-med-bg);
+  color: var(--c-conf-med-text);
 }
 
 .analysis-loading {
@@ -840,23 +876,23 @@ onMounted(async () => {
   margin-bottom: 20px;
   padding: 5px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #eef3f8;
+  border-radius: var(--radius-card);
+  background: var(--c-page-bg);
 }
 
 .analysis-tabs button {
   min-height: 38px;
   padding: 8px 14px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .analysis-tabs button.active {
-  color: var(--navy);
-  background: #fff;
+  color: var(--c-accent-text);
+  background: var(--c-accent-light);
   box-shadow: 0 1px 7px rgba(23, 32, 51, 0.09);
 }
 
@@ -902,14 +938,14 @@ onMounted(async () => {
 .tool-result-title h3 {
   margin: 0;
   font-size: 18px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .tool-result-title p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .tool-table {
@@ -918,14 +954,14 @@ onMounted(async () => {
 
 .status-card {
   padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fafbfc;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-page-bg);
 }
 
 .status-card strong {
   display: block;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .status-card p {
@@ -948,15 +984,15 @@ onMounted(async () => {
 .source-chip {
   padding: 6px 10px;
   border-radius: 999px;
-  color: #fff;
+  color: white;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .field-value {
   color: var(--ink);
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 500;
 }
 
 .field-value.arabic {
@@ -968,7 +1004,7 @@ onMounted(async () => {
 }
 
 .not-recognized {
-  color: #9ca3af;
+  color: var(--c-text-muted);
   font-style: italic;
   font-size: 0.8rem;
 }
@@ -984,8 +1020,8 @@ onMounted(async () => {
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fbfdff;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
 }
 
 .metric-block-top {
@@ -996,15 +1032,15 @@ onMounted(async () => {
 }
 
 .metric-block strong {
-  color: var(--navy);
+  color: var(--c-text-primary);
   font-size: 20px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .metric-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1021,19 +1057,19 @@ onMounted(async () => {
   min-width: 60px;
   min-height: 34px;
   padding: 6px 10px;
-  border-radius: 8px;
-  background: #eef6ff;
-  color: var(--navy);
+  border-radius: var(--radius-control);
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
   font-size: 15px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .tool-chip-active {
-  background: #15803d;
+  background: var(--c-conf-high-border);
 }
 
 .tool-chip-muted {
-  background: #94a3b8;
+  background: var(--c-text-muted);
 }
 
 @media (max-width: 1100px) {
@@ -1056,3 +1092,5 @@ onMounted(async () => {
   }
 }
 </style>
+
+

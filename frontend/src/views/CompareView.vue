@@ -28,7 +28,7 @@
         class="textarea arabic"
         dir="rtl"
         lang="ar"
-        placeholder="اكتب النص العربي هنا..."
+        placeholder="Enter Arabic text here..."
       ></textarea>
 
       <div class="run-row">
@@ -133,7 +133,7 @@
             <thead>
               <tr>
                 <th class="sticky-word-col">Word</th>
-                <th v-for="toolKey in compareCols" :key="toolKey" class="tool-col">
+                <th v-for="toolKey in compareCols" :key="toolKey" class="tool-col" :data-tool="toolKey">
                   <span class="header-tool">
                     <span class="header-dot" :style="{ backgroundColor: TOOL_CONFIG[toolKey].color }"></span>
                     <span>{{ TOOL_CONFIG[toolKey].label }}</span>
@@ -166,10 +166,10 @@
                       dir="rtl"
                       lang="ar"
                     >
-                      ({{ row.tools[toolKey].rawPos.substring(0, 15) }}...)
+                      {{ truncateRawPos(row.tools[toolKey].rawPos) }}
                     </small>
                   </div>
-                  <span v-else class="missing-cell">لم يتم التعرف</span>
+                  <EmptyCell v-else />
                 </td>
               </tr>
             </tbody>
@@ -252,6 +252,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import EmptyCell from '../components/EmptyCell.vue'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
@@ -405,19 +406,22 @@ function pushLine(target, value, label, rtl = false) {
 }
 
 function normalizeFusionRows(payload) {
-  const rows = Array.isArray(payload?.fusion_result?.fusion)
-    ? payload.fusion_result.fusion
-    : Array.isArray(payload?.fusion)
-      ? payload.fusion
-      : Array.isArray(payload?.result)
-        ? payload.result
-        : []
+  if (!payload) return []
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.fusion_result?.fusion)
+      ? payload.fusion_result.fusion
+      : Array.isArray(payload?.fusion)
+        ? payload.fusion
+        : Array.isArray(payload?.result)
+          ? payload.result
+          : []
 
   return rows.map((row, index) => ({
     index,
-    word: row?.word || row?.surface || `#${index + 1}`,
-    final: row?.final || {},
-    sources: row?.sources || {},
+    word: row?.word || row?.surface || row?.token || `#${index + 1}`,
+    final: row?.final || row?.fusion || {},
+    sources: row?.sources || row?.fusion?.chosen_sources || {},
     conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
     notes: Array.isArray(row?.notes) ? row.notes : [],
     confidence: row?.confidence || row?.final?.confidence_level || '',
@@ -469,7 +473,7 @@ function fusionSourceRows(sources) {
     feature,
     tool,
     shortLabel: shortToolLabel(tool),
-    color: TOOL_CONFIG[tool]?.color || '#64748b',
+    color: TOOL_CONFIG[tool]?.color || 'var(--c-text-secondary)',
   }))
 }
 
@@ -515,8 +519,9 @@ function readError(reason, fallback) {
   return reason?.response?.data?.detail || reason?.response?.data?.error || reason?.message || fallback
 }
 
-function value(item) {
-  return item || '—'
+function truncateRawPos(value) {
+  if (!value) return ''
+  return value.length > 20 ? `${value.substring(0, 20)}...` : value
 }
 
 onMounted(() => {
@@ -547,7 +552,7 @@ onMounted(() => {
 .copy-note {
   color: var(--green);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 500;
 }
 
 .disabled {
@@ -565,7 +570,7 @@ onMounted(() => {
   margin: 16px 0 18px;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(8px);
 }
@@ -573,10 +578,10 @@ onMounted(() => {
 .section-nav a {
   padding: 8px 12px;
   border-radius: 999px;
-  color: var(--navy);
-  background: #eef5ff;
+  color: var(--c-accent-text);
+  background: var(--c-accent-light);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 500;
 }
 
 .section-block {
@@ -602,17 +607,17 @@ onMounted(() => {
   height: 28px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .section-num {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
 }
 
 .section-icon {
-  background: #eef2ff;
-  color: #4338ca;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
 }
 
 .loading-grid {
@@ -640,8 +645,8 @@ onMounted(() => {
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fbfdff;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
 }
 
 .metric-strip-head {
@@ -654,22 +659,22 @@ onMounted(() => {
 .metric-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .metric-strip strong {
-  color: var(--navy);
+  color: var(--c-text-primary);
   font-size: 18px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .progress-track {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e7edf5;
+  background: var(--c-page-bg);
 }
 
 .progress-track span {
@@ -690,11 +695,11 @@ onMounted(() => {
   min-width: 64px;
   min-height: 34px;
   padding: 6px 10px;
-  border-radius: 8px;
-  background: #eef6ff;
-  color: var(--navy);
+  border-radius: var(--radius-control);
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
   font-size: 15px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .chip-row {
@@ -708,17 +713,17 @@ onMounted(() => {
   align-items: center;
   padding: 6px 10px;
   border-radius: 999px;
-  color: #fff;
+  color: white;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .tool-chip-active {
-  background: #15803d;
+  background: var(--c-conf-high-border);
 }
 
 .tool-chip-muted {
-  background: #94a3b8;
+  background: var(--c-text-muted);
 }
 
 .metrics-note {
@@ -748,7 +753,7 @@ onMounted(() => {
   width: 120px;
   min-width: 120px;
   max-width: 120px;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .comparison-table thead .sticky-word-col {
@@ -759,7 +764,25 @@ onMounted(() => {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: #f8fafc;
+  background: var(--c-page-bg);
+}
+
+.comparison-table thead th[data-tool="camel"],
+.comparison-table thead th[data-tool="alkhalil"] {
+  background: var(--c-morphology-bg);
+  color: var(--c-morphology-text);
+}
+
+.comparison-table thead th[data-tool="stanza"],
+.comparison-table thead th[data-tool="udpipe"] {
+  background: var(--c-syntax-bg);
+  color: var(--c-syntax-text);
+}
+
+.comparison-table thead th[data-tool="farasa"],
+.comparison-table thead th[data-tool="qalsadi"] {
+  background: var(--c-segment-bg);
+  color: var(--c-segment-text);
 }
 
 .header-tool {
@@ -782,13 +805,13 @@ onMounted(() => {
 
 .word-cell strong {
   font-size: 18px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .word-cell .mono {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .tool-col {
@@ -807,7 +830,7 @@ onMounted(() => {
   overflow: hidden;
   color: var(--ink);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -819,13 +842,13 @@ onMounted(() => {
 .missing-cell {
   color: var(--muted);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .pos-raw-hint {
   display: block;
   font-size: 0.65rem;
-  color: #6b7280;
+  color: var(--c-text-muted);
   direction: rtl;
   margin-top: 4px;
 }
@@ -838,8 +861,8 @@ onMounted(() => {
 .conflict-card {
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
 }
 
 .conflict-grid {
@@ -851,16 +874,16 @@ onMounted(() => {
 
 .conflict-word {
   font-size: 18px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .conflict-feature {
   padding: 6px 10px;
   border-radius: 999px;
-  background: #eef2f7;
-  color: #334155;
+  background: var(--c-page-bg);
+  color: var(--c-text-secondary);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .conflict-values {
@@ -873,15 +896,15 @@ onMounted(() => {
 .conflict-value {
   padding: 6px 10px;
   border-radius: 999px;
-  background: #f8fafc;
+  background: var(--c-page-bg);
   color: var(--ink);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 500;
 }
 
 .conflict-arrow {
   color: var(--muted);
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .fusion-list {
@@ -892,8 +915,8 @@ onMounted(() => {
 .fusion-card {
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fbfdff;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
 }
 
 .fusion-card-head {
@@ -914,14 +937,14 @@ onMounted(() => {
 .source-mini-table td {
   padding: 8px 10px;
   text-align: left;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--c-border);
 }
 
 .source-mini-table thead th {
   border-top: 0;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -931,9 +954,9 @@ onMounted(() => {
   align-items: center;
   padding: 5px 9px;
   border-radius: 999px;
-  color: #fff;
+  color: white;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .empty-source-cell {
@@ -943,10 +966,10 @@ onMounted(() => {
 
 .empty-state {
   padding: 16px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 10px;
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius-card);
   color: var(--muted);
-  background: #fafcff;
+  background: var(--c-page-bg);
 }
 
 .section-block {
@@ -978,3 +1001,5 @@ onMounted(() => {
   }
 }
 </style>
+
+

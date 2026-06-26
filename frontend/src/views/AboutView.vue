@@ -1,94 +1,96 @@
 <template>
-  <div class="page-wrap about-page">
+  <div class="page-wrap reports-page page-stack">
     <section class="hero-band compact-hero">
-      <span class="eyebrow">Project context</span>
-      <h1 class="hero-title">About the Platform</h1>
+      <span class="eyebrow">Project report</span>
+      <h1 class="hero-title">Graduation project review and improvement roadmap.</h1>
       <p class="hero-copy">
-        A practical comparative environment for Arabic NLP experiments, built with FastAPI,
-        Vue, and multiple Arabic language processing toolkits.
+        This page summarizes the platform from a research, software engineering, and UX perspective,
+        and highlights the changes that make the project read like a real comparative Arabic NLP system.
       </p>
     </section>
 
-    <section class="about-grid">
-      <article class="panel panel-pad">
-        <h2 class="section-title">Purpose</h2>
-        <p class="section-subtitle">
-          The platform helps researchers and students compare outputs from different Arabic NLP
-          systems using the same input sentence. It focuses on morphology, segmentation,
-          lemmatization, POS tagging, dependency parsing, and rule-based lexical evidence.
-        </p>
+    <section class="reports-grid">
+      <article class="panel panel-pad report-card">
+        <h2 class="section-title">Strengths</h2>
+        <ul class="report-list">
+          <li>Multiple Arabic analyzers are integrated behind a unified frontend.</li>
+          <li>Token-level comparison, fusion, and evaluation are already available.</li>
+          <li>The backend exposes structured outputs, confidence, and conflict traces.</li>
+          <li>The project already has the bones of a research workflow, not just a demo UI.</li>
+        </ul>
       </article>
 
-      <article class="panel panel-pad">
-        <h2 class="section-title">Runtime Notes</h2>
-        <p class="section-subtitle">
-          Qalsadi is lightweight compared with larger model-based analyzers, so it fits the
-          local FastAPI workflow well. For normal use, start the backend without
-          <code>--reload</code> so NLP resources remain in memory while the server is running.
-        </p>
+      <article class="panel panel-pad report-card">
+        <h2 class="section-title">Weaknesses</h2>
+        <ul class="report-list">
+          <li>The old interface mixed Arabic and English and did not feel like one product.</li>
+          <li>The dashboard lacked clear scientific summary cards and benchmark context.</li>
+          <li>Visualization depth was limited for a comparative research platform.</li>
+          <li>Some pages read like raw analysis tables rather than curated research views.</li>
+        </ul>
       </article>
     </section>
 
-    <section class="panel panel-pad tools-panel">
+    <section class="panel panel-pad report-panel">
       <div class="section-head">
         <div>
-          <h2 class="section-title">Integrated Tools</h2>
-          <p class="section-subtitle">
-            Every card is rendered from the shared tool config and updated from <code>GET /</code>.
-          </p>
+          <h2 class="section-title">Priority Improvements</h2>
+          <p class="section-subtitle">These are the most important changes for graduation readiness.</p>
         </div>
       </div>
 
-      <div class="tool-grid">
-        <article v-for="tool in toolCards" :key="tool.key" class="tool-card">
-          <div class="tool-card-head">
-            <div>
-              <h3>{{ tool.label }}</h3>
-              <p class="tool-name-en">{{ tool.type }} · {{ tool.license }}</p>
-            </div>
-            <span :class="['pill', statusBadge(tool.key).className]">{{ statusBadge(tool.key).label }}</span>
-          </div>
-
-          <div class="tool-color" :style="{ backgroundColor: tool.color }"></div>
-
-          <dl class="tool-meta">
-            <div>
-              <dt>Key Features</dt>
-              <dd>
-                <ul>
-                  <li v-for="feature in tool.features" :key="feature">{{ feature }}</li>
-                </ul>
-              </dd>
-            </div>
-            <div>
-              <dt>Paper</dt>
-              <dd><em>{{ tool.paper }}</em></dd>
-            </div>
-          </dl>
+      <div class="priority-grid">
+        <article v-for="item in priorities" :key="item.title" class="priority-card">
+          <span class="priority-index">{{ item.index }}</span>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.text }}</p>
         </article>
+      </div>
+    </section>
+
+    <section class="panel panel-pad report-panel">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Files to Review</h2>
+          <p class="section-subtitle">These are the highest-value frontend files for continued refinement.</p>
+        </div>
+      </div>
+
+      <div class="file-grid">
+        <a class="file-card" href="/frontend/src/App.vue">App.vue</a>
+        <a class="file-card" href="/frontend/src/views/HomeView.vue">HomeView.vue</a>
+        <a class="file-card" href="/frontend/src/views/AnalyzeView.vue">AnalyzeView.vue</a>
+        <a class="file-card" href="/frontend/src/views/CompareView.vue">CompareView.vue</a>
+        <a class="file-card" href="/frontend/src/views/EvaluateView.vue">EvaluateView.vue</a>
+        <a class="file-card" href="/frontend/src/views/SmartAnalysisView.vue">SmartAnalysisView.vue</a>
       </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { TOOL_CONFIG, TOOL_KEYS } from '../config/tools'
-import { useToolStatus } from '../composables/useToolStatus'
-
-const { toolStatus } = useToolStatus()
-
-const toolCards = computed(() => TOOL_KEYS.map((key) => ({ key, ...TOOL_CONFIG[key] })))
-
-function statusBadge(key) {
-  const status = toolStatus(key)
-  if (status === 'ok') return { label: 'active', className: 'pill-green' }
-  if (status === 'error') return { label: 'error', className: 'pill-red' }
-  if (status === 'unavailable') return { label: 'unavailable', className: 'pill-gray' }
-  if (status === 'lazy') return { label: 'loads on demand', className: 'pill-amber' }
-  if (status === 'future_work') return { label: 'planned', className: 'pill-gray' }
-  return { label: 'status unknown', className: 'pill-gray' }
-}
+const priorities = [
+  {
+    index: '01',
+    title: 'Polish the dashboard narrative',
+    text: 'Keep the landing page focused on live status, benchmark metrics, and system readiness so it immediately feels research-oriented.',
+  },
+  {
+    index: '02',
+    title: 'Strengthen scientific visualization',
+    text: 'Add more charts for agreement, confidence, conflicts, and tool ranking so the platform can support a thesis defense convincingly.',
+  },
+  {
+    index: '03',
+    title: 'Keep Arabic only where it matters',
+    text: 'Reserve Arabic for user input, token output, and linguistic examples while keeping all UI chrome in English.',
+  },
+  {
+    index: '04',
+    title: 'Preserve graceful fallback behavior',
+    text: 'Unavailable services should degrade to clear status cards instead of breaking the workflow or hiding information.',
+  },
+]
 </script>
 
 <style scoped>
@@ -96,106 +98,77 @@ function statusBadge(key) {
   padding: 34px 38px;
 }
 
-.compact-hero .hero-title {
-  font-size: 38px;
-}
-
-.about-grid {
+.reports-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  margin-top: 18px;
 }
 
-code {
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: #eef2f7;
-  color: var(--navy);
-  font-weight: 800;
-}
-
-.tools-panel {
-  margin-top: 18px;
-}
-
-.tool-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.tool-card {
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-}
-
-.tool-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.tool-card h3 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.tool-name-en {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.tool-color {
-  width: 100%;
-  height: 6px;
-  margin-bottom: 14px;
-  border-radius: 999px;
-}
-
-.tool-meta {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-}
-
-.tool-meta div {
-  display: grid;
-  gap: 4px;
-}
-
-dt {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-dd {
-  margin: 0;
-  color: var(--ink);
-  font-weight: 800;
-}
-
-ul {
+.report-list {
   margin: 0;
   padding-inline-start: 18px;
+  color: var(--c-text-secondary);
+  line-height: 1.7;
 }
 
-li {
-  margin: 2px 0;
+.report-list li + li {
+  margin-top: 8px;
+}
+
+.priority-grid,
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.priority-card,
+.file-card {
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-page-bg);
+}
+
+.priority-index {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 28px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.priority-card h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.priority-card p,
+.file-card {
+  color: var(--c-text-secondary);
+}
+
+.file-card {
+  display: block;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.file-card:hover {
+  border-color: var(--c-accent-border);
+  color: var(--c-accent-text);
 }
 
 @media (max-width: 980px) {
-  .about-grid,
-  .tool-grid {
+  .reports-grid,
+  .priority-grid,
+  .file-grid {
     grid-template-columns: 1fr;
   }
 }

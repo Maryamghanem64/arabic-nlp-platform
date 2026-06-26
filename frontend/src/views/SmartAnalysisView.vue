@@ -1,0 +1,980 @@
+<template>
+  <div class="page-wrap smart-page page-stack">
+    <section class="hero-band smart-hero">
+      <div class="hero-content">
+        <span class="eyebrow">Fusion analysis</span>
+        <h1 class="hero-title">Smart Arabic NLP fusion, explained token by token.</h1>
+        <p class="hero-copy">
+          This view merges analyzer outputs into one decision stream, then shows the winning value,
+          supporting evidence, confidence, and conflicts that deserve review.
+        </p>
+      </div>
+      <div class="tool-legend" aria-label="Tool color legend">
+        <ToolBadge v-for="(_, tool) in visibleToolColors" :key="tool" :tool="tool" />
+      </div>
+    </section>
+
+    <section class="panel panel-pad input-section">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Arabic Input</h2>
+          <p class="section-subtitle">Arabic stays in the input and the token outputs; the interface remains English.</p>
+        </div>
+      </div>
+
+      <div class="input-row">
+        <textarea
+          id="smart-input"
+          v-model="inputText"
+          class="arabic-input"
+          placeholder="Example: قرأ الطالب الكتب في المكتبة"
+          rows="2"
+          dir="rtl"
+          lang="ar"
+        ></textarea>
+        <button class="analyze-btn" :disabled="loading || !inputText.trim()" @click="runSmartAnalysis">
+          <span v-if="loading" class="spinner" aria-hidden="true"></span>
+          <span v-else>Run fusion</span>
+        </button>
+      </div>
+
+      <div class="examples-row">
+        <span class="examples-label">Quick examples:</span>
+        <button v-for="ex in EXAMPLE_SENTENCES" :key="ex" class="example-chip" @click="runExample(ex)">
+          {{ ex }}
+        </button>
+      </div>
+    </section>
+
+    <div v-if="error" class="error-banner">{{ error }}</div>
+
+    <div v-if="loading" class="loading-state smart-loading">
+      <div class="loading-spinner-large"></div>
+      <p>Running {{ activeToolCount }} tools and collecting fused evidence...</p>
+    </div>
+
+    <template v-if="fusionResult && !loading">
+      <section class="summary-bar" aria-label="Fusion summary">
+        <div class="summary-item">
+          <span class="summary-label">Tokens</span>
+          <strong>{{ fusionResult.length }}</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Active tools</span>
+          <strong class="tool-list">{{ activeToolsLabel }}</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Conflicts</span>
+          <strong class="conflict-count">{{ totalConflicts }}</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Average confidence</span>
+          <strong>{{ averageConfidenceLabel }}</strong>
+        </div>
+      </section>
+
+      <section class="tokens-grid" aria-label="Token fusion cards">
+        <article
+          v-for="(token, idx) in fusionResult"
+          :key="`${token.word}-${idx}`"
+          class="token-card"
+          :class="{ 'has-conflicts': token.conflicts.length }"
+        >
+          <header class="token-header">
+            <div>
+              <div class="token-word arabic-word">{{ token.word }}</div>
+              <div class="token-meta">Winning value source map and conflict trace</div>
+            </div>
+            <ConfidenceBadge :level="token.final.confidence_level" :score="token.final.confidence_score" />
+          </header>
+
+          <div class="features-grid">
+            <div class="feature-item">
+              <div class="feature-label-row">
+                <span class="feature-label">Lemma</span>
+                <ToolBadge :tool="sourceFor(token, 'lemma', 'camel')" />
+              </div>
+              <span v-if="hasValue(token.final.lemma)" class="feature-value arabic-value">{{ token.final.lemma }}</span>
+              <EmptyCell v-else />
+            </div>
+
+            <div class="feature-item">
+              <div class="feature-label-row">
+                <span class="feature-label">Root</span>
+                <ToolBadge :tool="sourceFor(token, 'root', 'camel')" />
+              </div>
+              <template v-if="hasValue(token.final.root)">
+                <span class="feature-value root-value ltr-value">{{ token.final.root }}</span>
+                <span v-if="token.final.root_type" class="root-type-badge">{{ rootTypeLabel(token.final.root_type) }}</span>
+              </template>
+              <EmptyCell v-else />
+            </div>
+
+            <div class="feature-item">
+              <div class="feature-label-row">
+                <span class="feature-label">POS</span>
+                <ToolBadge :tool="sourceFor(token, 'pos', 'camel')" />
+              </div>
+              <span v-if="hasValue(token.final.pos)" class="pos-badge ltr-value">
+                {{ POS_AR[token.final.pos] || token.final.pos }}
+              </span>
+              <EmptyCell v-else />
+            </div>
+
+            <div v-if="hasValue(token.final.gloss)" class="feature-item">
+              <div class="feature-label-row">
+                <span class="feature-label">English gloss</span>
+                <ToolBadge :tool="sourceFor(token, 'gloss', 'camel')" />
+              </div>
+              <span class="gloss-value ltr-value">{{ token.final.gloss }}</span>
+            </div>
+
+            <div v-if="token.final.gender || token.final.number" class="feature-item">
+              <span class="feature-label">Gender and number</span>
+              <div class="morph-pills">
+                <span v-if="token.final.gender" class="morph-pill">{{ genderLabel(token.final.gender) }}</span>
+                <span v-if="token.final.number" class="morph-pill">{{ NUMBER_AR[token.final.number] || token.final.number }}</span>
+              </div>
+            </div>
+
+            <div v-if="token.final.tense" class="feature-item">
+              <span class="feature-label">Tense</span>
+              <span class="morph-pill">{{ TENSE_AR[token.final.tense] || token.final.tense }}</span>
+            </div>
+
+            <div v-if="token.final.case || token.final.definite || token.final.voice" class="feature-item">
+              <div class="feature-label-row">
+                <span class="feature-label">Case and definiteness</span>
+                <ToolBadge :tool="sourceFor(token, 'case', 'stanza')" />
+              </div>
+              <div class="morph-pills">
+                <span v-if="token.final.case" class="morph-pill stanza-pill">{{ CASE_AR[token.final.case] || token.final.case }}</span>
+                <span v-if="token.final.definite" class="morph-pill stanza-pill">{{ definiteLabel(token.final.definite) }}</span>
+                <span v-if="token.final.voice" class="morph-pill stanza-pill">{{ voiceLabel(token.final.voice) }}</span>
+              </div>
+            </div>
+
+            <div v-if="segmentationList(token).length" class="feature-item full-width">
+              <div class="feature-label-row">
+                <span class="feature-label">Segmentation</span>
+                <ToolBadge :tool="sourceFor(token, 'segmentation', 'farasa')" />
+              </div>
+              <div class="seg-pills">
+                <span v-for="(seg, si) in segmentationList(token)" :key="`${idx}-${si}`" class="seg-pill arabic-value">{{ seg }}</span>
+              </div>
+            </div>
+
+            <div v-if="dependencyLabel(token.final.dependency)" class="feature-item full-width">
+              <div class="feature-label-row">
+                <span class="feature-label">Dependency</span>
+                <ToolBadge :tool="sourceFor(token, 'dependency', 'stanza')" />
+              </div>
+              <div class="dep-row">
+                <span class="dep-rel">{{ dependencyLabel(token.final.dependency) }}</span>
+                <span v-if="token.final.dependency?.head_text" class="dep-head arabic-value">{{ token.final.dependency.head_text }}</span>
+              </div>
+            </div>
+          </div>
+
+          <section class="decision-trace">
+            <button class="trace-toggle btn-ghost" type="button" @click="toggleTrace(idx)">
+              {{ showTrace[idx] ? 'Hide decision trace' : 'Show decision trace' }}
+            </button>
+            <div v-if="showTrace[idx]" class="trace-body">
+              <div v-for="row in traceRows(token)" :key="row.feature" class="trace-row">
+                <span class="trace-feature">{{ featureLabel(row.feature) }}</span>
+                <ToolBadge :tool="row.tool" />
+                <span class="trace-value">{{ row.value }}</span>
+                <small class="trace-support">{{ row.explanation }}</small>
+              </div>
+              <div v-if="!traceRows(token).length" class="null-value">No additional decision details were returned.</div>
+            </div>
+          </section>
+
+          <section v-if="token.conflicts.length" class="conflicts-section">
+            <div class="conflicts-header">
+              <span class="conflict-badge">Conflict</span>
+              <span>{{ token.conflicts.length }} items need review</span>
+            </div>
+            <div v-for="(conflict, cidx) in token.conflicts" :key="`${idx}-conf-${cidx}`" class="conflict-item">
+              <span class="conflict-feature-name">{{ featureLabel(conflict.feature) }}</span>
+              <div class="conflict-values">
+                <span class="conf-val"><ToolBadge :tool="conflict.tool_a" /> {{ displayValue(conflict.tool_a_value) }}</span>
+                <span class="vs-sep">/</span>
+                <span class="conf-val"><ToolBadge :tool="conflict.tool_b" /> {{ displayValue(conflict.tool_b_value) }}</span>
+              </div>
+            </div>
+          </section>
+        </article>
+      </section>
+
+      <section v-if="contributionGroups.length" class="section-card contribution-section">
+        <h2 class="section-title">Contribution summary</h2>
+        <div class="contribution-grid">
+          <article v-for="group in contributionGroups" :key="group.key" class="contrib-card" :class="`group-${group.key}`">
+            <div class="contrib-head">
+              <span class="feature-label">{{ group.label }}</span>
+              <span class="group-count">{{ group.items.length }}</span>
+            </div>
+            <div class="contrib-items">
+              <div v-for="item in group.items" :key="item.tool" class="contrib-item">
+                <ToolBadge :tool="item.tool" />
+                <div class="contrib-features">
+                  <span v-for="feat in item.features" :key="feat" class="contrib-feat">{{ feat }}</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { computed, ref } from 'vue'
+import axios from 'axios'
+import ConfidenceBadge from '@/components/ConfidenceBadge.vue'
+import EmptyCell from '@/components/EmptyCell.vue'
+import ToolBadge from '@/components/ToolBadge.vue'
+import { API_BASE_URL } from '@/api/nlpApi'
+import { TOOL_COLORS, TOOL_GROUPS } from '@/constants/designTokens'
+
+const inputText = ref('')
+const loading = ref(false)
+const error = ref('')
+const fusionResult = ref(null)
+const activeTools = ref([])
+const showTrace = ref({})
+
+const visibleToolColors = computed(() =>
+  Object.fromEntries(Object.entries(TOOL_COLORS).filter(([tool]) => ['camel', 'stanza', 'farasa', 'alkhalil', 'udpipe', 'qalsadi'].includes(tool))),
+)
+
+const EXAMPLE_SENTENCES = [
+  'قرأ الطالب الكتب في المكتبة',
+  'وجدت المعلمة طالبة مجتهدة في الفصل',
+  'يكتب الصحفي المقالة كل يوم',
+]
+
+const POS_AR = {
+  VERB: 'Verb',
+  NOUN: 'Noun',
+  ADJ: 'Adjective',
+  ADP: 'Adposition',
+  PRON: 'Pronoun',
+  ADV: 'Adverb',
+  CCONJ: 'Coordinating conjunction',
+  PART: 'Particle',
+  NUM: 'Number',
+  DET: 'Determiner',
+  PUNCT: 'Punctuation',
+}
+const CASE_AR = { nom: 'Nominative', acc: 'Accusative', gen: 'Genitive', Nom: 'Nominative', Acc: 'Accusative', Gen: 'Genitive' }
+const TENSE_AR = { past: 'Past', perf: 'Past', pres: 'Present', imperf: 'Present', imp: 'Imperative', fut: 'Future' }
+const NUMBER_AR = { singular: 'Singular', sing: 'Singular', dual: 'Dual', plural: 'Plural', plur: 'Plural' }
+const DEPREL_AR = {
+  nsubj: 'Subject',
+  obj: 'Object',
+  obl: 'Oblique',
+  amod: 'Adjectival modifier',
+  nmod: 'Nominal modifier',
+  case: 'Case marker',
+  det: 'Determiner',
+  root: 'Sentence root',
+  compound: 'Compound',
+  advmod: 'Adverbial modifier',
+  conj: 'Conjunct',
+  cc: 'Coordinating conjunction',
+}
+
+const FEATURE_SOURCE_EXPLANATION = {
+  lemma: 'CAMeL Tools is often the strongest source for lexical normalization.',
+  root: 'CAMeL Tools provides root extraction signals.',
+  root_type: 'Root type classification is mostly provided by CAMeL metadata.',
+  gloss: 'CAMeL glosses provide a compact English meaning cue.',
+  pos: 'POS uses agreement-aware selection across analyzers.',
+  gender: 'CAMeL morphology provides gender evidence.',
+  number: 'CAMeL morphology provides number evidence.',
+  tense: 'CAMeL morphology provides tense evidence.',
+  case: 'Stanza and dependency-aware analyzers provide case evidence.',
+  definite: 'Stanza often supplies definiteness markers.',
+  voice: 'Voice is usually derived from morphology metadata.',
+  dependency: 'Stanza provides dependency evidence.',
+  segmentation: 'Farasa provides segmentation evidence.',
+}
+
+const activeToolCount = computed(() => activeTools.value.length || 6)
+const activeToolsLabel = computed(() => (activeTools.value.length ? activeTools.value.join(' / ') : 'CAMeL / Stanza / Farasa / Qalsadi'))
+const totalConflicts = computed(() => fusionResult.value?.reduce((sum, token) => sum + token.conflicts.length, 0) || 0)
+const averageConfidenceLabel = computed(() => {
+  if (!fusionResult.value?.length) return '0%'
+  const scores = fusionResult.value
+    .map((token) => Number(token?.final?.confidence_score))
+    .filter((value) => Number.isFinite(value))
+  if (!scores.length) return '0%'
+  return `${Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 100)}%`
+})
+
+const toolContributions = computed(() => {
+  if (!fusionResult.value) return {}
+  const contribs = {}
+  fusionResult.value.forEach((token) => {
+    Object.entries(token.sources || {}).forEach(([feature, tool]) => {
+      if (!tool || tool === 'agreement') return
+      if (!contribs[tool]) contribs[tool] = new Set()
+      contribs[tool].add(featureLabel(feature))
+    })
+  })
+  return Object.fromEntries(Object.entries(contribs).map(([tool, features]) => [tool, [...features]]))
+})
+
+const contributionGroups = computed(() => {
+  const groups = [
+    { key: 'morphology', label: 'Morphology / Sarf', tools: TOOL_GROUPS.morphology },
+    { key: 'syntax', label: 'Syntax / Nahw', tools: TOOL_GROUPS.syntax },
+    { key: 'segmentation', label: 'Segmentation / Taqti', tools: TOOL_GROUPS.segmentation },
+  ]
+
+  return groups
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      items: group.tools
+        .map((tool) => ({ tool, features: toolContributions.value[tool] || [] }))
+        .filter((item) => item.features.length),
+    }))
+    .filter((group) => group.items.length)
+})
+
+async function runSmartAnalysis() {
+  if (!inputText.value.trim()) return
+  loading.value = true
+  error.value = ''
+  fusionResult.value = null
+  showTrace.value = {}
+
+  try {
+    const { data } = await axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } })
+    const normalized = normalizeFusionRows(data)
+    fusionResult.value = normalized.rows
+    activeTools.value = normalized.activeTools
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || 'Unable to reach the backend. Make sure FastAPI is running on localhost:8000.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function runExample(example) {
+  inputText.value = example
+  runSmartAnalysis()
+}
+
+function normalizeFusionRows(payload) {
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.fusion)
+      ? payload.fusion
+      : Array.isArray(payload?.fusion_result?.fusion)
+        ? payload.fusion_result.fusion
+        : Array.isArray(payload?.fusion_result)
+          ? payload.fusion_result
+          : []
+
+  return {
+    rows: rows.map((row, index) => {
+      const legacyFinal = row?.fusion || {}
+      const final = {
+        ...(row?.final || {}),
+        confidence_score: row?.final?.confidence_score ?? row?.confidence_score ?? legacyFinal.confidence ?? 0,
+        confidence_level: row?.final?.confidence_level || row?.confidence_level || legacyFinal.confidence_level || 'low',
+      }
+      if (!final.pos && legacyFinal.final_pos) final.pos = legacyFinal.final_pos
+      if (!final.lemma && legacyFinal.final_lemma) final.lemma = legacyFinal.final_lemma
+      if (!final.segmentation && legacyFinal.final_segmentation) final.segmentation = legacyFinal.final_segmentation
+
+      return {
+        index,
+        word: row?.word || row?.surface || row?.token || `#${index + 1}`,
+        final,
+        sources: row?.sources || legacyFinal.chosen_sources || {},
+        conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
+        notes: Array.isArray(row?.notes) ? row.notes : [],
+        decision_trace: Array.isArray(row?.decision_trace) ? row.decision_trace : [],
+      }
+    }),
+    activeTools: payload?.active_tools || payload?.meta?.active_tools || [],
+  }
+}
+
+function toggleTrace(index) {
+  showTrace.value = { ...showTrace.value, [index]: !showTrace.value[index] }
+}
+
+function traceRows(token) {
+  if (token.decision_trace.length) return token.decision_trace
+  return Object.entries(token.sources || {}).map(([feature, tool]) => ({
+    feature,
+    tool,
+    value: displayValue(token.final?.[feature]),
+    explanation: FEATURE_SOURCE_EXPLANATION[feature] || 'This value was selected from the strongest available source.',
+  }))
+}
+
+function sourceFor(token, feature, fallback) {
+  return token.sources?.[feature] || fallback
+}
+
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== '' && value !== 'null'
+}
+
+function segmentationList(token) {
+  const value = token.final.segmentation
+  if (Array.isArray(value)) return value.filter(hasValue)
+  if (typeof value === 'string' && value.trim()) return value.split(/[+ ]/).filter(Boolean)
+  return []
+}
+
+function dependencyLabel(dep) {
+  if (!dep) return ''
+  const deprel = typeof dep === 'string' ? dep : dep.deprel
+  if (!deprel || deprel === 'root') return deprel === 'root' ? DEPREL_AR.root : ''
+  return DEPREL_AR[deprel] || deprel
+}
+
+function displayValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join(' + ') : 'Not recognized'
+  return hasValue(value) ? String(value) : 'Not recognized'
+}
+
+function featureLabel(feature) {
+  const labels = {
+    lemma: 'Lemma',
+    root: 'Root',
+    root_type: 'Root type',
+    pos: 'POS',
+    gloss: 'Gloss',
+    gender: 'Gender',
+    number: 'Number',
+    tense: 'Tense',
+    case: 'Case',
+    definite: 'Definiteness',
+    voice: 'Voice',
+    dependency: 'Dependency',
+    segmentation: 'Segmentation',
+  }
+  return labels[feature] || feature
+}
+
+function rootTypeLabel(value) {
+  if (value === 'triliteral') return 'Triliteral'
+  if (value === 'biliteral') return 'Biliteral'
+  if (value === 'monoliteral') return 'Monoliteral'
+  return value
+}
+
+function genderLabel(value) {
+  return value === 'masculine' || value === 'masc' || value === 'Masc' ? 'Masculine' : 'Feminine'
+}
+
+function definiteLabel(value) {
+  return value === 'yes' || value === 'Def' ? 'Definite' : 'Indefinite'
+}
+
+function voiceLabel(value) {
+  return value === 'passive' || value === 'Pass' ? 'Passive' : 'Active'
+}
+</script>
+
+<style scoped>
+.smart-page {
+  display: grid;
+  gap: 18px;
+}
+
+.smart-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.tool-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.input-section {
+  margin-bottom: 0;
+}
+
+.input-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 8px;
+}
+
+.arabic-input {
+  flex: 1;
+  min-height: 74px;
+  padding: 12px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  color: var(--c-text-primary);
+  background: var(--c-surface);
+  font-size: 20px;
+  line-height: 1.7;
+  resize: vertical;
+  outline: none;
+}
+
+.arabic-input:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-light);
+}
+
+.analyze-btn {
+  min-width: 138px;
+  min-height: 52px;
+  padding: 12px 24px;
+  border-radius: var(--radius-control);
+  color: white;
+  background: linear-gradient(135deg, var(--c-text-primary), var(--c-accent));
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.analyze-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.spinner,
+.loading-spinner-large {
+  display: inline-block;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+}
+
+.examples-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.examples-label {
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+
+.example-chip {
+  padding: 5px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  color: var(--c-text-secondary);
+  background: var(--c-page-bg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.error-banner {
+  padding: 12px 16px;
+  border: 1px solid var(--c-conf-low-border);
+  border-radius: var(--radius-control);
+  color: var(--c-conf-low-text);
+  background: var(--c-conf-low-bg);
+}
+
+.smart-loading {
+  min-height: 180px;
+}
+
+.loading-spinner-large {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 1rem;
+  border: 3px solid var(--c-border);
+  border-top-color: var(--c-accent);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-page-bg);
+}
+
+.summary-item {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+}
+
+.summary-label {
+  color: var(--c-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.summary-item strong {
+  color: var(--c-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tool-list {
+  direction: ltr;
+  text-align: right;
+}
+
+.conflict-count {
+  color: var(--c-segment-text) !important;
+}
+
+.tokens-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.token-card {
+  padding: 1.25rem;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-surface);
+}
+
+.token-card.has-conflicts {
+  border-color: var(--c-conf-med-border);
+  background: linear-gradient(180deg, var(--c-surface) 0%, var(--c-conf-med-bg) 140%);
+}
+
+.token-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--c-page-bg);
+}
+
+.token-word {
+  color: var(--c-text-primary);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.token-meta {
+  margin-top: 6px;
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+
+.features-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.feature-item {
+  display: grid;
+  gap: 5px;
+}
+
+.feature-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.feature-value {
+  color: var(--c-text-primary);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.root-value {
+  color: var(--c-morphology-text);
+  letter-spacing: 0.08em;
+}
+
+.root-type-badge {
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--c-morphology-text);
+  background: var(--c-morphology-bg);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pos-badge,
+.morph-pill,
+.seg-pill,
+.dep-rel {
+  width: fit-content;
+  border-radius: var(--radius-chip);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pos-badge {
+  padding: 4px 12px;
+  border: 1px solid var(--c-accent-border);
+  color: var(--c-accent-text);
+  background: var(--c-accent-light);
+}
+
+.gloss-value {
+  direction: ltr;
+  color: var(--c-text-secondary);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.morph-pills,
+.seg-pills,
+.dep-row,
+.conflict-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.morph-pill {
+  padding: 4px 10px;
+  color: var(--c-text-secondary);
+  background: var(--c-page-bg);
+}
+
+.stanza-pill {
+  color: var(--c-conf-high-text);
+  background: var(--c-conf-high-bg);
+}
+
+.seg-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--c-morphology-border);
+  color: var(--c-morphology-text);
+  background: var(--c-morphology-bg);
+}
+
+.dep-rel {
+  padding: 4px 10px;
+  color: var(--c-conf-high-text);
+  background: var(--c-conf-high-bg);
+}
+
+.dep-head {
+  color: var(--c-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.decision-trace {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-page-bg);
+}
+
+.trace-toggle {
+  padding: 0;
+  color: var(--c-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.trace-body {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.trace-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--c-page-bg);
+  font-size: 12px;
+}
+
+.trace-feature {
+  min-width: 86px;
+  color: var(--c-text-secondary);
+  font-weight: 600;
+}
+
+.trace-value {
+  color: var(--c-text-primary);
+  font-weight: 600;
+}
+
+.trace-support {
+  color: var(--c-text-muted);
+}
+
+.conflicts-section {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-conf-med-border);
+  border-radius: var(--radius-control);
+  background: var(--c-conf-med-bg);
+}
+
+.conflicts-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--c-conf-med-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.conflict-item {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.conflict-feature-name {
+  color: var(--c-conf-med-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.conf-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.vs-sep {
+  color: var(--c-segment-text);
+  font-weight: 700;
+}
+
+.contribution-section {
+  margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0 0 1rem;
+  color: var(--c-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.contribution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.contrib-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-page-bg);
+}
+
+.contrib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.group-count {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.contrib-items {
+  display: grid;
+  gap: 8px;
+}
+
+.contrib-item {
+  display: grid;
+  gap: 6px;
+}
+
+.contrib-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.contrib-feat {
+  padding: 3px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  color: var(--c-text-secondary);
+  background: var(--c-surface);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+@media (max-width: 860px) {
+  .smart-hero,
+  .input-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .tool-legend {
+    justify-content: flex-start;
+  }
+
+  .analyze-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .tokens-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

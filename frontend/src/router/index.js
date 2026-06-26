@@ -1,17 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView    from '../views/HomeView.vue'
-import AnalyzeView from '../views/AnalyzeView.vue'
-import CompareView from '../views/CompareView.vue'
-import AboutView   from '../views/AboutView.vue'
 
-const router = createRouter({
+const routes = [
+  { path: '/', name: 'home', component: () => import('@/views/HomeView.vue') },
+  { path: '/dashboard', redirect: '/' },
+  { path: '/analyze', name: 'analyze', component: () => import('@/views/AnalyzeView.vue') },
+  { path: '/smart', name: 'smart', component: () => import('@/views/SmartAnalysisView.vue') },
+  { path: '/compare', name: 'compare', component: () => import('@/views/CompareView.vue') },
+  { path: '/evaluate', name: 'evaluate', component: () => import('@/views/EvaluateView.vue') },
+  { path: '/reports', name: 'reports', component: () => import('@/views/AboutView.vue') },
+  { path: '/about', redirect: '/reports' },
+]
+
+export default createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: [
-    { path: '/',        component: HomeView    },
-    { path: '/analyze', component: AnalyzeView },
-    { path: '/compare', component: CompareView },
-    { path: '/about',   component: AboutView   },
-  ]
+  routes,
 })
-
-export default router
