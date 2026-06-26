@@ -82,6 +82,47 @@
         </article>
       </div>
 
+      <section class="analysis-visual-grid">
+        <ScientificChart
+          type="radar"
+          title="Overall Evaluation"
+          subtitle="Agreement, lemma, and coverage quality."
+          badge="Score"
+          :labels="overallRadar.labels"
+          :datasets="overallRadar.datasets"
+          :height="280"
+          aria-label="Overall evaluation radar chart"
+          empty-title="No evaluation data"
+          empty-text="Run the evaluation pipeline to populate the score radar."
+        />
+
+        <ScientificChart
+          type="bar"
+          title="Performance Snapshot"
+          subtitle="Accuracy and coverage at a glance."
+          badge="Metrics"
+          :labels="performanceBar.labels"
+          :datasets="performanceBar.datasets"
+          :height="280"
+          aria-label="Performance snapshot chart"
+          empty-title="No performance data"
+          empty-text="The metrics chart appears after evaluation completes."
+        />
+
+        <ScientificChart
+          type="bar"
+          title="Runtime and Scale"
+          subtitle="Frontend-measured response time and token volume."
+          badge="Timing"
+          :labels="runtimeBar.labels"
+          :datasets="runtimeBar.datasets"
+          :height="280"
+          aria-label="Runtime chart"
+          empty-title="No runtime data"
+          empty-text="A completed request is required to show runtime metrics."
+        />
+      </section>
+
       <section class="panel panel-pad report-panel">
         <div class="section-head">
           <div>
@@ -125,6 +166,33 @@
           </article>
         </div>
       </section>
+
+      <section class="panel panel-pad conclusions-panel">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Scientific Conclusions</h2>
+            <p class="section-subtitle">A compact defense-ready interpretation of the current run.</p>
+          </div>
+        </div>
+        <div class="conclusion-grid">
+          <article class="conclusion-card">
+            <strong>Agreement quality</strong>
+            <p>{{ conclusionText.agreement }}</p>
+          </article>
+          <article class="conclusion-card">
+            <strong>Coverage quality</strong>
+            <p>{{ conclusionText.coverage }}</p>
+          </article>
+          <article class="conclusion-card">
+            <strong>Runtime note</strong>
+            <p>{{ conclusionText.runtime }}</p>
+          </article>
+          <article class="conclusion-card">
+            <strong>Defense takeaway</strong>
+            <p>{{ conclusionText.takeaway }}</p>
+          </article>
+        </div>
+      </section>
     </section>
   </div>
 </template>
@@ -133,12 +201,15 @@
 import { computed, ref } from 'vue'
 import axios from 'axios'
 import ToolBadge from '@/components/ToolBadge.vue'
+import ScientificChart from '@/components/ScientificChart.vue'
 import { API_BASE_URL } from '@/api/nlpApi'
+import { recordAnalysis } from '@/utils/analysisHistory'
 
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
 const payload = ref(null)
+const requestDuration = ref(0)
 
 const EXAMPLE_SENTENCES = [
   'قرأ الطالب الكتب في المكتبة',
@@ -150,16 +221,93 @@ const activeTools = computed(() => payload.value?.active_tools || evalResult.val
 const excludedTools = computed(() => evalResult.value?.excluded_tools || payload.value?.meta?.degraded_tools || [])
 const posConflicts = computed(() => evalResult.value?.pos_conflicts || [])
 const rawNote = computed(() => evalResult.value?.metrics_note || '')
+const overallRadar = computed(() => ({
+  labels: ['POS', 'Lemma match', 'Coverage', 'Exact lemma'],
+  datasets: [
+    {
+      label: 'Score %',
+      data: [
+        metricPercent(evalResult.value?.pos_agreement),
+        metricPercent(evalResult.value?.lemma_normalized_match),
+        metricPercent(evalResult.value?.segmentation_coverage),
+        metricPercent(evalResult.value?.lemma_exact_match),
+      ],
+      borderColor: '#14B8A6',
+      backgroundColor: 'rgba(20, 184, 166, 0.16)',
+    },
+  ],
+}))
+const performanceBar = computed(() => ({
+  labels: ['POS', 'Lemma', 'Coverage', 'Exact'],
+  datasets: [
+    {
+      label: 'Percentage',
+      data: [
+        metricPercent(evalResult.value?.pos_agreement),
+        metricPercent(evalResult.value?.lemma_normalized_match),
+        metricPercent(evalResult.value?.segmentation_coverage),
+        metricPercent(evalResult.value?.lemma_exact_match),
+      ],
+      backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED'],
+    },
+  ],
+}))
+const runtimeBar = computed(() => ({
+  labels: ['Request ms', 'Tokens', 'Active tools'],
+  datasets: [
+    {
+      label: 'Current run',
+      data: [
+        requestDuration.value,
+        inputText.value.trim() ? inputText.value.trim().split(/\s+/).length : 0,
+        activeTools.value.length,
+      ],
+      backgroundColor: ['#4F46E5', '#14B8A6', '#D97706'],
+    },
+  ],
+}))
+const conclusionText = computed(() => {
+  const agreement = metricPercent(evalResult.value?.pos_agreement)
+  const coverage = metricPercent(evalResult.value?.segmentation_coverage)
+  return {
+    agreement:
+      agreement >= 0.8
+        ? 'The current run shows strong agreement across the active analyzers.'
+        : agreement >= 0.6
+          ? 'The current run is moderately consistent and merits token-level inspection.'
+          : 'The current run shows low agreement and should be reviewed carefully.',
+    coverage:
+      coverage >= 0.8
+        ? 'Segmentation coverage is strong enough for comparative analysis.'
+        : coverage >= 0.5
+          ? 'Coverage is usable but uneven across the sentence.'
+          : 'Coverage is limited and may affect downstream interpretation.',
+    runtime:
+      requestDuration.value
+        ? `The last evaluation completed in ${requestDuration.value} ms on the current frontend session.`
+        : 'Runtime was not captured for this run.',
+    takeaway:
+      rawNote.value || 'The evaluation should be paired with compare and fusion views during the defense.',
+  }
+})
 
 async function runEvaluation() {
   if (!inputText.value.trim()) return
   loading.value = true
   error.value = ''
   payload.value = null
+  requestDuration.value = 0
 
   try {
+    const started = performance.now()
     const { data } = await axios.get(`${API_BASE_URL}/evaluate`, { params: { text: inputText.value } })
+    requestDuration.value = Math.round(performance.now() - started)
     payload.value = data
+    recordAnalysis({
+      page: 'Evaluate',
+      text: inputText.value.trim(),
+      summary: `${percentLabel(normalizeEvaluation(data).pos_agreement, 0)} POS agreement | ${requestDuration.value} ms`,
+    })
   } catch (e) {
     error.value = e?.response?.data?.detail || e?.message || 'Unable to connect to the evaluation service.'
   } finally {
@@ -309,6 +457,12 @@ function conflictText(conflict) {
   gap: 18px;
 }
 
+.analysis-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
 .report-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -371,15 +525,50 @@ function conflictText(conflict) {
   line-height: 1.55;
 }
 
+.conclusions-panel {
+  margin-top: 0;
+}
+
+.conclusion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.conclusion-card {
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-page-bg);
+}
+
+.conclusion-card strong {
+  display: block;
+  color: var(--c-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.conclusion-card p {
+  margin: 6px 0 0;
+  color: var(--c-text-secondary);
+  line-height: 1.55;
+}
+
 @media (max-width: 760px) {
   .input-row,
-  .report-grid {
+  .report-grid,
+  .conclusion-grid {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
 
   .run-btn {
     width: 100%;
+  }
+
+  .analysis-visual-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

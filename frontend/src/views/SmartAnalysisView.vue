@@ -73,6 +73,47 @@
         </div>
       </section>
 
+      <section class="analysis-visual-grid">
+        <ScientificChart
+          type="line"
+          title="Fusion Confidence"
+          subtitle="Confidence score for each token."
+          badge="Confidence"
+          :labels="confidenceTimeline.labels"
+          :datasets="confidenceTimeline.datasets"
+          :height="260"
+          aria-label="Fusion confidence chart"
+          empty-title="No confidence timeline"
+          empty-text="The fusion payload did not include confidence scores."
+        />
+
+        <ScientificChart
+          type="bar"
+          title="Conflict Severity"
+          subtitle="High, medium, and low conflict counts."
+          badge="Conflicts"
+          :labels="conflictSeverityChart.labels"
+          :datasets="conflictSeverityChart.datasets"
+          :height="260"
+          aria-label="Conflict severity chart"
+          empty-title="No conflict severity data"
+          empty-text="No conflict information was returned for this fusion run."
+        />
+
+        <ScientificChart
+          type="bar"
+          title="Contribution Chart"
+          subtitle="Evidence field counts by tool."
+          badge="Tools"
+          :labels="toolContributionChart.labels"
+          :datasets="toolContributionChart.datasets"
+          :height="260"
+          aria-label="Tool contribution chart"
+          empty-title="No contribution data"
+          empty-text="Contribution counts require a successful fusion response."
+        />
+      </section>
+
       <section class="tokens-grid" aria-label="Token fusion cards">
         <article
           v-for="(token, idx) in fusionResult"
@@ -237,8 +278,10 @@ import axios from 'axios'
 import ConfidenceBadge from '@/components/ConfidenceBadge.vue'
 import EmptyCell from '@/components/EmptyCell.vue'
 import ToolBadge from '@/components/ToolBadge.vue'
+import ScientificChart from '@/components/ScientificChart.vue'
 import { API_BASE_URL } from '@/api/nlpApi'
 import { TOOL_COLORS, TOOL_GROUPS } from '@/constants/designTokens'
+import { recordAnalysis } from '@/utils/analysisHistory'
 
 const inputText = ref('')
 const loading = ref(false)
@@ -246,6 +289,7 @@ const error = ref('')
 const fusionResult = ref(null)
 const activeTools = ref([])
 const showTrace = ref({})
+const lastDuration = ref(0)
 
 const visibleToolColors = computed(() =>
   Object.fromEntries(Object.entries(TOOL_COLORS).filter(([tool]) => ['camel', 'stanza', 'farasa', 'alkhalil', 'udpipe', 'qalsadi'].includes(tool))),
@@ -315,6 +359,57 @@ const averageConfidenceLabel = computed(() => {
   if (!scores.length) return '0%'
   return `${Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 100)}%`
 })
+const confidenceTimeline = computed(() => ({
+  labels: fusionResult.value?.map((_, index) => `${index + 1}`) || [],
+  datasets: [
+    {
+      label: 'Confidence %',
+      data: fusionResult.value?.map((row) => Math.round((Number(row?.final?.confidence_score) || 0) * 100)) || [],
+      borderColor: '#14B8A6',
+      backgroundColor: 'rgba(20, 184, 166, 0.16)',
+    },
+  ],
+}))
+const conflictSeverityChart = computed(() => {
+  const counts = { high: 0, medium: 0, low: 0 }
+  fusionResult.value?.forEach((token) => {
+    token.conflicts?.forEach((conflict) => {
+      const severity = String(conflict.severity || 'low').toLowerCase()
+      if (counts[severity] !== undefined) counts[severity] += 1
+    })
+  })
+  const labels = ['High', 'Medium', 'Low'].filter((label) => counts[label.toLowerCase()] > 0)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Conflicts',
+        data: labels.map((label) => counts[label.toLowerCase()]),
+        backgroundColor: ['#DC2626', '#D97706', '#14B8A6'],
+      },
+    ],
+  }
+})
+const toolContributionChart = computed(() => {
+  const counts = {}
+  fusionResult.value?.forEach((token) => {
+    Object.entries(token.sources || {}).forEach(([feature, tool]) => {
+      if (!tool || tool === 'agreement') return
+      counts[tool] = (counts[tool] || 0) + 1
+    })
+  })
+  const labels = Object.keys(counts)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Fields',
+        data: labels.map((label) => counts[label]),
+        backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED', '#0EA5E9'],
+      },
+    ],
+  }
+})
 
 const toolContributions = computed(() => {
   if (!fusionResult.value) return {}
@@ -353,12 +448,20 @@ async function runSmartAnalysis() {
   error.value = ''
   fusionResult.value = null
   showTrace.value = {}
+  lastDuration.value = 0
 
   try {
+    const started = performance.now()
     const { data } = await axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } })
+    lastDuration.value = Math.round(performance.now() - started)
     const normalized = normalizeFusionRows(data)
     fusionResult.value = normalized.rows
     activeTools.value = normalized.activeTools
+    recordAnalysis({
+      page: 'Fusion',
+      text: inputText.value.trim(),
+      summary: `${normalized.rows.length} tokens | ${totalConflicts.value} conflicts | ${averageConfidenceLabel.value} avg confidence`,
+    })
   } catch (e) {
     error.value = e?.response?.data?.detail || e?.message || 'Unable to reach the backend. Make sure FastAPI is running on localhost:8000.'
   } finally {
@@ -645,6 +748,12 @@ function voiceLabel(value) {
   color: var(--c-text-primary);
   font-size: 16px;
   font-weight: 600;
+}
+
+.analysis-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .tool-list {
@@ -969,6 +1078,10 @@ function voiceLabel(value) {
 
   .analyze-btn {
     width: 100%;
+  }
+
+  .analysis-visual-grid {
+    grid-template-columns: 1fr;
   }
 }
 

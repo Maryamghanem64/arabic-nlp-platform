@@ -95,6 +95,73 @@
       </div>
     </section>
 
+    <section v-if="hasResults && !loading" class="analysis-visual-grid">
+      <ScientificChart
+        type="line"
+        title="Token Confidence Timeline"
+        subtitle="Confidence by token position for the current analysis."
+        badge="Timeline"
+        :labels="tokenTimelineChart.labels"
+        :datasets="tokenTimelineChart.datasets"
+        :height="260"
+        aria-label="Token confidence timeline"
+        empty-title="No token timeline"
+        empty-text="The current result set does not include confidence scores."
+      />
+
+      <ScientificChart
+        type="bar"
+        title="POS Distribution"
+        subtitle="Distribution of part-of-speech labels in the current result."
+        badge="POS"
+        :labels="posDistributionChart.labels"
+        :datasets="posDistributionChart.datasets"
+        :height="260"
+        aria-label="POS distribution chart"
+        empty-title="No POS distribution"
+        empty-text="The current result set does not include POS labels."
+      />
+
+      <ScientificChart
+        type="doughnut"
+        title="Morphological Categories"
+        subtitle="Gender, number, and tense evidence returned by the analyzer."
+        badge="Morphology"
+        :labels="morphologyChart.labels"
+        :datasets="morphologyChart.datasets"
+        :height="260"
+        aria-label="Morphological categories chart"
+        empty-title="No morphology summary"
+        empty-text="The selected tool did not return enough morphology evidence."
+      />
+    </section>
+
+    <section v-if="hasResults && !loading" class="analysis-visual-grid analysis-visual-grid--wide">
+      <HeatmapMatrix
+        title="Evidence Heatmap"
+        subtitle="Token-by-feature presence and confidence."
+        badge="Matrix"
+        :rows="heatmapRows"
+        :cols="heatmapCols"
+        :values="heatmapValues"
+        empty-title="No evidence matrix"
+        empty-text="The current run does not expose enough structured evidence to build a matrix."
+      />
+
+      <ScientificChart
+        type="bar"
+        title="Tool Evidence Mix"
+        subtitle="How many evidence fields each tool contributed."
+        badge="Tools"
+        :labels="toolContributionChart.labels"
+        :datasets="toolContributionChart.datasets"
+        :height="260"
+        aria-label="Tool contribution bar chart"
+        empty-title="No contribution data"
+        empty-text="Contribution counts will appear after a result set is available."
+      />
+    </section>
+
     <div v-if="statusError && !toolStatusesLoaded" class="error-state">
       <div>
         <strong>Backend status unavailable</strong>
@@ -314,10 +381,13 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import EmptyCell from '../components/EmptyCell.vue'
+import ScientificChart from '../components/ScientificChart.vue'
+import HeatmapMatrix from '../components/HeatmapMatrix.vue'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
 import { canonicalToken } from '../utils/tokenModel'
+import { recordAnalysis } from '../utils/analysisHistory'
 
 const route = useRoute()
 const inputText = ref('')
@@ -330,6 +400,7 @@ const activeTab = ref('results')
 const copied = ref(false)
 const pendingTool = ref('')
 const selectionNotice = ref(null)
+const lastRunSummary = ref('')
 
 const {
   toolStatuses,
@@ -353,6 +424,110 @@ const hasResults = computed(() => Boolean(rawResults.value || fusionPayload.valu
 const jsonExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'json') : '#'))
 const csvExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'csv') : '#'))
 const prettyJson = computed(() => JSON.stringify({ analysis: rawResults.value, fusion: fusionPayload.value }, null, 2))
+const currentRows = computed(() => {
+  if (selectedTool.value === 'all') {
+    return (fusionPayload.value || []).map((row, index) => ({
+      index,
+      surface: row.word,
+      confidence: Number(row?.final?.confidence_score ?? row?.final?.confidence ?? row?.confidence_score ?? 0),
+      values: {
+        lemma: row?.final?.lemma,
+        root: row?.final?.root,
+        pos: row?.final?.pos,
+        segmentation: row?.final?.segmentation,
+        dependency: row?.final?.dependency,
+        confidence_score: row?.final?.confidence_score,
+        confidence_level: row?.final?.confidence_level,
+      },
+    }))
+  }
+  return toolRows(selectedTool.value)
+})
+const tokenTimelineChart = computed(() => {
+  const rows = currentRows.value
+  const values = rows.map((row) => Math.round((Number(row.confidence) || 0) * 100))
+  return {
+    labels: rows.map((row) => `${row.index + 1}`),
+    datasets: [
+      {
+        label: 'Confidence %',
+        data: values,
+        borderColor: '#4F46E5',
+        backgroundColor: 'rgba(79, 70, 229, 0.14)',
+      },
+    ],
+  }
+})
+const posDistributionChart = computed(() => {
+  const counts = {}
+  currentRows.value.forEach((row) => {
+    const pos = String(row.values?.pos || '').trim()
+    if (!pos) return
+    counts[pos] = (counts[pos] || 0) + 1
+  })
+  const labels = Object.keys(counts)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Tokens',
+        data: labels.map((label) => counts[label]),
+        backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED', '#0EA5E9', '#22C55E'],
+      },
+    ],
+  }
+})
+const morphologyChart = computed(() => {
+  const counts = { Gender: 0, Number: 0, Tense: 0 }
+  currentRows.value.forEach((row) => {
+    if (row.values?.gender) counts.Gender += 1
+    if (row.values?.number) counts.Number += 1
+    if (row.values?.tense) counts.Tense += 1
+  })
+  const labels = Object.keys(counts).filter((label) => counts[label] > 0)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Morphology fields',
+        data: labels.map((label) => counts[label]),
+        backgroundColor: ['#7C3AED', '#D97706', '#14B8A6'],
+      },
+    ],
+  }
+})
+const heatmapRows = computed(() => currentRows.value.map((row) => row.surface))
+const heatmapCols = ['Lemma', 'Root', 'POS', 'Confidence']
+const heatmapValues = computed(() =>
+  currentRows.value.map((row) => [
+    hasTokenValue(row.values?.lemma) ? 1 : 0,
+    hasTokenValue(row.values?.root) ? 1 : 0,
+    hasTokenValue(row.values?.pos) ? 1 : 0,
+    Math.round((Number(row.confidence) || 0) * 100) / 100,
+  ]),
+)
+const toolContributionChart = computed(() => {
+  const counts = {}
+  currentRows.value.forEach((row) => {
+    Object.keys(row.values || {}).forEach((field) => {
+      if (!hasTokenValue(row.values[field])) return
+      const source = sourceForCurrentTool(field)
+      if (!source) return
+      counts[source] = (counts[source] || 0) + 1
+    })
+  })
+  const labels = Object.keys(counts)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Evidence fields',
+        data: labels.map((label) => counts[label]),
+        backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED'],
+      },
+    ],
+  }
+})
 const tabs = computed(() => [
   { key: 'results', label: selectedTool.value === 'all' ? 'All tools' : 'Token breakdown' },
   { key: 'fusion', label: 'Fusion' },
@@ -424,6 +599,7 @@ async function analyze() {
     if (selectedTool.value === 'all') {
       await loadFusion()
     }
+    captureRunSummary()
   } catch (e) {
     error.value = readError(e, 'Failed to connect to the backend.')
   } finally {
@@ -702,6 +878,7 @@ function clear() {
   pendingTool.value = ''
   selectedTool.value = 'all'
   activeTab.value = 'results'
+  lastRunSummary.value = ''
 }
 
 function guardExport(event) {
@@ -729,6 +906,28 @@ onMounted(async () => {
     analyze()
   }
 })
+
+function sourceForCurrentTool(field) {
+  if (selectedTool.value === 'all') {
+    return field === 'segmentation' ? 'Farasa' : field === 'dependency' ? 'Stanza' : 'Fusion'
+  }
+  return TOOL_CONFIG[selectedTool.value]?.label || selectedTool.value
+}
+
+function captureRunSummary() {
+  const toolLabel = selectedTool.value === 'all' ? 'All tools' : TOOL_CONFIG[selectedTool.value]?.label || selectedTool.value
+  const rows = currentRows.value
+  const tokenCount = rows.length
+  const avgConfidence = rows.length
+    ? Math.round((rows.reduce((sum, row) => sum + (Number(row.confidence) || 0), 0) / rows.length) * 100)
+    : 0
+  lastRunSummary.value = `${toolLabel} | ${tokenCount} tokens | ${avgConfidence}% average confidence`
+  recordAnalysis({
+    page: 'Analyze',
+    text: inputText.value.trim(),
+    summary: lastRunSummary.value,
+  })
+}
 </script>
 
 <style scoped>
@@ -1072,10 +1271,22 @@ onMounted(async () => {
   background: var(--c-text-muted);
 }
 
+.analysis-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.analysis-visual-grid--wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 @media (max-width: 1100px) {
   .selector-grid,
   .results-grid,
-  .evaluation-grid {
+  .evaluation-grid,
+  .analysis-visual-grid,
+  .analysis-visual-grid--wide {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1083,7 +1294,9 @@ onMounted(async () => {
 @media (max-width: 720px) {
   .selector-grid,
   .results-grid,
-  .evaluation-grid {
+  .evaluation-grid,
+  .analysis-visual-grid,
+  .analysis-visual-grid--wide {
     grid-template-columns: 1fr;
   }
 

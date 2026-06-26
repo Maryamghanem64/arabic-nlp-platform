@@ -162,6 +162,47 @@
       </article>
     </section>
 
+    <section class="analysis-visual-grid">
+      <ScientificChart
+        type="doughnut"
+        title="Tool Availability Mix"
+        subtitle="Online versus offline or degraded tools."
+        badge="Live"
+        :labels="toolAvailabilityChart.labels"
+        :datasets="toolAvailabilityChart.datasets"
+        :height="260"
+        aria-label="Tool availability doughnut chart"
+        empty-title="Waiting for tool status"
+        empty-text="The chart will populate as soon as the backend status endpoint responds."
+      />
+
+      <ScientificChart
+        type="bar"
+        title="Benchmark Snapshot"
+        subtitle="Agreement, confidence, and latency from the active reference run."
+        badge="Benchmark"
+        :labels="benchmarkChart.labels"
+        :datasets="benchmarkChart.datasets"
+        :height="260"
+        aria-label="Benchmark snapshot bar chart"
+        empty-title="Waiting for benchmark data"
+        empty-text="Run the benchmark once to populate the research summary."
+      />
+
+      <ScientificChart
+        type="radar"
+        title="Group Coverage"
+        subtitle="Morphology, syntax, and segmentation coverage."
+        badge="Coverage"
+        :labels="groupCoverageChart.labels"
+        :datasets="groupCoverageChart.datasets"
+        :height="280"
+        aria-label="Coverage radar chart"
+        empty-title="Waiting for coverage data"
+        empty-text="Coverage chart appears after the tool registry loads."
+      />
+    </section>
+
     <section class="dashboard-grid dashboard-grid--tertiary">
       <article class="panel panel-pad services-panel">
         <div class="section-head">
@@ -204,15 +245,73 @@
         </div>
       </article>
     </section>
+
+    <section class="dashboard-grid dashboard-grid--secondary">
+      <article class="panel panel-pad recent-panel">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Recent Analyses</h2>
+            <p class="section-subtitle">Stored locally from previous frontend analysis runs.</p>
+          </div>
+        </div>
+
+        <div v-if="recentAnalyses.length" class="recent-list">
+          <article v-for="entry in recentAnalyses" :key="entry.id" class="recent-card">
+            <div class="recent-card-head">
+              <strong>{{ entry.page }}</strong>
+              <span class="recent-time">{{ formatRelativeTime(entry.at) }}</span>
+            </div>
+            <p>{{ entry.text }}</p>
+            <div v-if="entry.summary" class="recent-summary">{{ entry.summary }}</div>
+          </article>
+        </div>
+        <div v-else class="empty-state recent-empty">
+          <div>
+            <strong>No recent analyses yet</strong>
+            <p>Run Analyze, Compare, or Fusion once and the latest experiments will appear here.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel panel-pad quick-actions-panel">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Quick Actions</h2>
+            <p class="section-subtitle">Fast navigation for defense-day workflows.</p>
+          </div>
+        </div>
+
+        <div class="quick-actions-grid">
+          <RouterLink to="/analyze" class="quick-action-card">
+            <strong>Single-tool analysis</strong>
+            <span>Inspect one analyzer in depth.</span>
+          </RouterLink>
+          <RouterLink to="/compare" class="quick-action-card">
+            <strong>Comparison matrix</strong>
+            <span>Review disagreements and agreement metrics.</span>
+          </RouterLink>
+          <RouterLink to="/smart" class="quick-action-card">
+            <strong>Evidence fusion</strong>
+            <span>See why each value won the vote.</span>
+          </RouterLink>
+          <RouterLink to="/evaluate" class="quick-action-card">
+            <strong>Scientific report</strong>
+            <span>Check benchmark and coverage summaries.</span>
+          </RouterLink>
+        </div>
+      </article>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { evaluateText, fusionText } from '@/api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS } from '@/config/tools'
 import { useToolStatus } from '@/composables/useToolStatus'
 import { TOOL_GROUPS } from '@/constants/designTokens'
+import ScientificChart from '@/components/ScientificChart.vue'
+import { readAnalysisHistory } from '@/utils/analysisHistory'
 
 const { toolStatuses, activeTools, loading: statusLoading, error: statusError, refresh } = useToolStatus()
 
@@ -342,6 +441,8 @@ const corpora = ref([
   { name: 'export_dataset.json', description: 'Export-ready structured data for comparison and reporting.' },
   { name: 'benchmark_progress.jsonl', description: 'Incremental benchmark progress log for reproducibility.' },
 ])
+
+const recentAnalyses = ref(readAnalysisHistory())
 
 async function refreshDashboard() {
   benchmarkLoading.value = true
@@ -489,7 +590,80 @@ async function initializeDashboard() {
     : 'Benchmark data is unavailable, but the dashboard remains usable.'
 }
 
+function refreshRecentAnalyses() {
+  recentAnalyses.value = readAnalysisHistory()
+}
+
+const handleHistoryUpdate = () => refreshRecentAnalyses()
+
+const dashboardMetrics = computed(() => ({
+  activeTools: activeToolCount.value,
+  tasks: supportedTasks.value,
+  healthLabel: benchmarkMetrics.value.ok ? 'Healthy' : 'Degraded',
+}))
+
+const toolAvailabilityChart = computed(() => {
+  const online = activeToolCount.value
+  const offline = Math.max(0, totalTools.value - online)
+  return {
+    labels: ['Online', 'Offline'],
+    datasets: [
+      {
+        label: 'Tools',
+        data: [online, offline],
+        backgroundColor: ['#14B8A6', '#CBD5E1'],
+      },
+    ],
+  }
+})
+
+const benchmarkChart = computed(() => ({
+  labels: ['Agreement', 'Confidence', 'Latency'],
+  datasets: [
+    {
+      label: 'Benchmark',
+      data: [
+        Math.round(benchmarkMetrics.value.agreement * 100),
+        Math.round(benchmarkMetrics.value.confidence * 100),
+        Math.max(0, 100 - Math.min(100, Math.round(benchmarkMetrics.value.responseTimeMs / 12))),
+      ],
+      backgroundColor: ['#4F46E5', '#14B8A6', '#D97706'],
+    },
+  ],
+}))
+
+const groupCoverageChart = computed(() => ({
+  labels: Object.values(TOOL_GROUPS).map((tools, index) => (index === 0 ? 'Morphology' : index === 1 ? 'Syntax' : 'Segmentation')),
+  datasets: [
+    {
+      label: 'Coverage',
+      data: groupHealth.value.map((group) => group.ratio),
+      backgroundColor: ['#7C3AED66', '#05966966', '#D9770666'],
+      borderColor: ['#7C3AED', '#059669', '#D97706'],
+      fill: true,
+    },
+  ],
+}))
+
+function formatRelativeTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime()
+  const minutes = Math.max(1, Math.round(diff / 60000))
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.max(1, Math.round(minutes / 60))
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.max(1, Math.round(hours / 24))
+  return `${days}d ago`
+}
+
 onMounted(initializeDashboard)
+
+onMounted(() => {
+  window.addEventListener('analysis-history-updated', handleHistoryUpdate)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('analysis-history-updated', handleHistoryUpdate)
+})
 </script>
 
 <style scoped>
@@ -538,6 +712,12 @@ onMounted(initializeDashboard)
 .dashboard-grid--secondary,
 .dashboard-grid--tertiary {
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+}
+
+.analysis-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .summary-panel,
@@ -717,14 +897,78 @@ onMounted(initializeDashboard)
   margin-bottom: 14px;
 }
 
+.recent-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recent-card {
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-page-bg);
+}
+
+.recent-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.recent-card p {
+  margin: 8px 0 0;
+  color: var(--c-text-secondary);
+}
+
+.recent-summary {
+  margin-top: 10px;
+  color: var(--c-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recent-empty {
+  min-height: 180px;
+}
+
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quick-action-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.96));
+  text-decoration: none;
+}
+
+.quick-action-card strong {
+  color: var(--c-text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.quick-action-card span {
+  color: var(--c-text-secondary);
+  line-height: 1.5;
+}
+
 @media (max-width: 1100px) {
   .dashboard-hero,
   .dashboard-grid,
   .dashboard-grid--secondary,
   .dashboard-grid--tertiary,
+  .analysis-visual-grid,
   .service-grid,
   .corpus-list,
-  .capability-grid {
+  .capability-grid,
+  .quick-actions-grid {
     grid-template-columns: 1fr;
   }
 }

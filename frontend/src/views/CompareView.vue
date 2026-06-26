@@ -49,6 +49,73 @@
       <a href="#fusion-sources">Sources</a>
     </nav>
 
+    <section v-if="hasResults && !loading" class="analysis-visual-grid">
+      <ScientificChart
+        type="radar"
+        title="Agreement Radar"
+        subtitle="POS, lemma, root, and segmentation agreement."
+        badge="Agreement"
+        :labels="agreementRadar.labels"
+        :datasets="agreementRadar.datasets"
+        :height="280"
+        aria-label="Agreement radar chart"
+        empty-title="No agreement data"
+        empty-text="The backend did not return enough comparison metrics."
+      />
+
+      <ScientificChart
+        type="bar"
+        title="Runtime Comparison"
+        subtitle="Measured frontend request durations for each API call."
+        badge="Timing"
+        :labels="runtimeChart.labels"
+        :datasets="runtimeChart.datasets"
+        :height="280"
+        aria-label="Runtime comparison chart"
+        empty-title="No runtime data"
+        empty-text="Response-time metrics will appear after a comparison run."
+      />
+
+      <HeatmapMatrix
+        title="Agreement Heatmap"
+        subtitle="Token-wise confidence and conflict density."
+        badge="Heatmap"
+        :rows="heatmapRows"
+        :cols="heatmapCols"
+        :values="heatmapValues"
+        empty-title="No heatmap data"
+        empty-text="The comparison payload did not expose enough token-level data."
+      />
+    </section>
+
+    <section v-if="hasResults && !loading" class="analysis-visual-grid analysis-visual-grid--wide">
+      <ScientificChart
+        type="bar"
+        title="Tool Contribution"
+        subtitle="How many fields each tool contributed to the comparison."
+        badge="Tools"
+        :labels="toolContributionChart.labels"
+        :datasets="toolContributionChart.datasets"
+        :height="260"
+        aria-label="Tool contribution chart"
+        empty-title="No contribution data"
+        empty-text="Contribution counts require a successful comparison payload."
+      />
+
+      <ScientificChart
+        type="line"
+        title="Conflict Timeline"
+        subtitle="Conflicts by token position."
+        badge="Conflicts"
+        :labels="conflictTimeline.labels"
+        :datasets="conflictTimeline.datasets"
+        :height="260"
+        aria-label="Conflict timeline chart"
+        empty-title="No conflict timeline"
+        empty-text="No per-token conflict counts were returned."
+      />
+    </section>
+
     <div v-if="statusError && !toolStatusesLoaded" class="error-state">
       <div>
         <strong>Backend status unavailable</strong>
@@ -253,10 +320,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import EmptyCell from '../components/EmptyCell.vue'
+import ScientificChart from '../components/ScientificChart.vue'
+import HeatmapMatrix from '../components/HeatmapMatrix.vue'
 import { API_BASE_URL, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
 import { canonicalToken } from '../utils/tokenModel'
+import { recordAnalysis } from '../utils/analysisHistory'
 
 const route = useRoute()
 const inputText = ref('')
@@ -266,6 +336,7 @@ const comparisonPayload = ref(null)
 const fusionPayload = ref(null)
 const evaluationPayload = ref(null)
 const copied = ref(false)
+const timingSnapshot = ref({ compare: 0, fusion: 0, evaluate: 0 })
 
 const { toolStatuses, activeTools, loading: statusLoading, error: statusError, refresh, toolStatus } = useToolStatus()
 
@@ -286,6 +357,81 @@ const conflictBadge = computed(() => {
 })
 const jsonExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'json') : '#'))
 const csvExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'csv') : '#'))
+const agreementRadar = computed(() => ({
+  labels: ['POS', 'Lemma', 'Root', 'Segmentation'],
+  datasets: [
+    {
+      label: 'Agreement %',
+      data: [
+        metricPercent(evaluation.value.pos_agreement_pct),
+        metricPercent(evaluation.value.lemma_match_pct),
+        metricPercent(evaluation.value.root_agreement_pct || evaluation.value.root_match_pct || 0),
+        metricPercent(evaluation.value.segmentation_agreement_pct || evaluation.value.segmentation_coverage || 0),
+      ],
+      borderColor: '#4F46E5',
+      backgroundColor: 'rgba(79, 70, 229, 0.16)',
+    },
+  ],
+}))
+const runtimeChart = computed(() => {
+  const entries = [
+    ['Compare', timingSnapshot.value.compare],
+    ['Fusion', timingSnapshot.value.fusion],
+    ['Evaluate', timingSnapshot.value.evaluate],
+  ].filter(([, value]) => value > 0)
+  return {
+    labels: entries.map(([label]) => label),
+    datasets: [
+      {
+        label: 'ms',
+        data: entries.map(([, value]) => value),
+        backgroundColor: ['#4F46E5', '#14B8A6', '#D97706'],
+      },
+    ],
+  }
+})
+const heatmapRows = computed(() => comparisonRows.value.map((row) => row.word))
+const heatmapCols = ['POS', 'Lemma', 'Root', 'Conflicts']
+const heatmapValues = computed(() =>
+  comparisonRows.value.map((row) => {
+    const posAgreement = row.tools ? Object.values(row.tools).filter((cell) => cell.available).length : 0
+    const conflictCount = Array.isArray(row.conflicts) ? row.conflicts.length : 0
+    const lemmaOk = row.agreement?.lemma?.status === 'agreement' ? 1 : row.agreement?.lemma?.status === 'partial' ? 0.5 : 0
+    const rootOk = row.agreement?.root?.status === 'agreement' ? 1 : row.agreement?.root?.status === 'partial' ? 0.5 : 0
+    return [posAgreement / Math.max(compareCols.value.length, 1), lemmaOk, rootOk, conflictCount ? 1 : 0]
+  }),
+)
+const toolContributionChart = computed(() => {
+  const counts = {}
+  comparisonRows.value.forEach((row) => {
+    Object.entries(row.tools || {}).forEach(([toolKey, cell]) => {
+      if (!cell?.available) return
+      counts[toolKey] = (counts[toolKey] || 0) + cell.lines.length
+    })
+  })
+  const labels = Object.keys(counts)
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Fields',
+        data: labels.map((label) => counts[label]),
+        backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED', '#0EA5E9'],
+      },
+    ],
+  }
+})
+const conflictTimeline = computed(() => ({
+  labels: conflictRows.value.map((row) => `#${row.index + 1}`),
+  datasets: [
+    {
+      label: 'Conflicts',
+      data: conflictRows.value.map((row) => (row.severity === 'high' ? 3 : row.severity === 'medium' ? 2 : 1)),
+      borderColor: '#D97706',
+      backgroundColor: 'rgba(217, 119, 6, 0.16)',
+    },
+  ],
+}))
 
 async function compare() {
   if (!inputText.value.trim()) return
@@ -304,18 +450,31 @@ async function compare() {
 
   try {
     const [compareResult, fusionResult, evaluationResult] = await Promise.allSettled([
-      axios.get(`${API_BASE_URL}/compare`, { params: { text: inputText.value, tools: compareCols.value.join(',') } }),
-      axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } }),
-      axios.get(`${API_BASE_URL}/evaluate`, { params: { text: inputText.value } }),
+      timedGet(`${API_BASE_URL}/compare`, { text: inputText.value, tools: compareCols.value.join(',') }),
+      timedGet(`${API_BASE_URL}/fusion`, { text: inputText.value }),
+      timedGet(`${API_BASE_URL}/evaluate`, { text: inputText.value }),
     ])
 
     if (compareResult.status !== 'fulfilled') {
       throw new Error(readError(compareResult.reason, 'Unable to run comparison.'))
     }
 
-    comparisonPayload.value = compareResult.value.data
-    fusionPayload.value = fusionResult.status === 'fulfilled' ? fusionResult.value.data : null
-    evaluationPayload.value = evaluationResult.status === 'fulfilled' ? evaluationResult.value.data : null
+    timingSnapshot.value = {
+      compare: compareResult.status === 'fulfilled' ? compareResult.value.duration : 0,
+      fusion: fusionResult.status === 'fulfilled' ? fusionResult.value.duration : 0,
+      evaluate: evaluationResult.status === 'fulfilled' ? evaluationResult.value.duration : 0,
+    }
+    const comparisonData = compareResult.value.data
+    const fusionData = fusionResult.status === 'fulfilled' ? fusionResult.value.data : null
+    const evaluationData = evaluationResult.status === 'fulfilled' ? evaluationResult.value.data : null
+    comparisonPayload.value = comparisonData
+    fusionPayload.value = fusionData
+    evaluationPayload.value = evaluationData
+    recordAnalysis({
+      page: 'Compare',
+      text: inputText.value.trim(),
+      summary: `${compareCols.value.length} tools | ${(comparisonData?.comparison || []).length} tokens | ${Array.isArray(fusionData?.fusion) ? fusionData.fusion.length : 0} fused`,
+    })
   } catch (e) {
     error.value = e.message || 'Failed to connect to the backend.'
   } finally {
@@ -343,6 +502,12 @@ async function copyResults() {
 
 function guardExport(event) {
   if (!hasResults.value) event.preventDefault()
+}
+
+async function timedGet(url, params) {
+  const started = performance.now()
+  const { data } = await axios.get(url, { params })
+  return { data, duration: Math.round(performance.now() - started) }
 }
 
 function loadSample() {
@@ -959,6 +1124,17 @@ onMounted(() => {
   font-weight: 500;
 }
 
+.analysis-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.analysis-visual-grid--wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .empty-source-cell {
   color: var(--muted);
   text-align: center;
@@ -988,6 +1164,11 @@ onMounted(() => {
   .comparison-table th,
   .comparison-table td {
     width: 130px;
+  }
+
+  .analysis-visual-grid,
+  .analysis-visual-grid--wide {
+    grid-template-columns: 1fr;
   }
 }
 
