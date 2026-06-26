@@ -158,7 +158,7 @@
                         </span>
                       </td>
                       <td>
-                        <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || '—' }}</span>
+                        <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || 'low' }}</span>
                       </td>
                     </tr>
                   </tbody>
@@ -202,7 +202,7 @@
                       </span>
                     </td>
                     <td>
-                      <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || '—' }}</span>
+                      <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || 'low' }}</span>
                     </td>
                   </tr>
                 </tbody>
@@ -235,16 +235,17 @@
                   <th>Segmentation</th>
                   <th>Confidence</th>
                   <th>Sources</th>
+                  <th>Conflicts</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in fusionRows" :key="`${row.word}-${row.index}`">
                   <td class="arabic" dir="rtl" lang="ar">{{ row.word }}</td>
-                  <td>{{ value(row.final.lemma) }}</td>
-                  <td>{{ value(row.final.root) }}</td>
-                  <td>{{ value(row.final.pos) }}</td>
-                  <td>{{ row.final.segmentation?.join(' + ') || '—' }}</td>
-                  <td><span :class="['pill', confidencePill(row.final.confidence_level)]">{{ row.final.confidence_level || '—' }}</span></td>
+                  <td>{{ displayTokenValue('lemma', row.final.lemma) }}</td>
+                  <td>{{ displayTokenValue('root', row.final.root) }}</td>
+                  <td>{{ displayTokenValue('pos', row.final.pos) }}</td>
+                  <td>{{ displayTokenValue('segmentation', row.final.segmentation) }}</td>
+                  <td><span :class="['pill', confidencePill(row.final.confidence_level)]">{{ row.final.confidence_level || 'low' }}</span></td>
                   <td>
                     <div class="chip-row">
                       <span
@@ -256,6 +257,25 @@
                         {{ chip.label }}
                       </span>
                     </div>
+                  </td>
+                  <td>
+                    <div v-if="row.conflicts?.length" class="conflict-stack">
+                      <article v-for="(conflict, cIndex) in row.conflicts" :key="`${row.index}-conflict-${cIndex}`" class="conflict-mini-card">
+                        <div class="conflict-mini-head">
+                          <span class="conflict-mini-field">{{ fieldLabel(conflict.feature) }}</span>
+                          <span :class="['pill', severityPill(conflict.severity)]">{{ conflict.severity || 'low' }}</span>
+                        </div>
+                        <div class="conflict-mini-line">
+                          <strong>Tools</strong>
+                          <span>{{ conflict.tool_a }} vs {{ conflict.tool_b }}</span>
+                        </div>
+                        <div class="conflict-mini-line">
+                          <strong>Values</strong>
+                          <span>{{ displayConflictValue(conflict.tool_a_value) }} / {{ displayConflictValue(conflict.tool_b_value) }}</span>
+                        </div>
+                      </article>
+                    </div>
+                    <span v-else class="no-conflict-label">No conflicts</span>
                   </td>
                 </tr>
               </tbody>
@@ -410,7 +430,7 @@ async function loadFusion() {
 }
 
 function toolRows(toolKey) {
-  const payload = selectedTool.value === 'all' ? rawResults.value?.[toolKey] : rawResults.value
+  const payload = toolPayloadForKey(toolKey)
   const tokens = Array.isArray(payload?.tokens) ? payload.tokens : []
   return tokens.map((token, index) => {
     const best = canonicalToken(token)
@@ -432,10 +452,10 @@ function toolColumns(toolKey) {
 }
 
 function normalizeFusionRows(payload) {
-  const rows = Array.isArray(payload?.fusion_result?.fusion)
-    ? payload.fusion_result.fusion
-    : Array.isArray(payload?.fusion)
-      ? payload.fusion
+  const rows = Array.isArray(payload?.fusion)
+    ? payload.fusion
+    : Array.isArray(payload?.fusion_result?.fusion)
+      ? payload.fusion_result.fusion
       : Array.isArray(payload?.result)
         ? payload.result
         : []
@@ -445,7 +465,16 @@ function normalizeFusionRows(payload) {
     word: row?.word || row?.surface || `#${index + 1}`,
     final: row?.final || {},
     sources: row?.sources || {},
+    conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
+    notes: Array.isArray(row?.notes) ? row.notes : [],
   }))
+}
+
+function toolPayloadForKey(toolKey) {
+  if (selectedTool.value === 'all') {
+    return rawResults.value?.tools?.[toolKey] ?? rawResults.value?.[toolKey] ?? null
+  }
+  return rawResults.value
 }
 
 function fusionSourceChips(sources) {
@@ -467,9 +496,9 @@ function formatSegmentation(token) {
 }
 
 function confidenceFromToken(token) {
-  const raw = token?.confidence_level || token?.confidence
+  const raw = token?.confidence_level || token?.confidence?.level || token?.confidence
   if (raw) return String(raw).toLowerCase()
-  const score = token?.confidence_score
+  const score = token?.confidence_score ?? token?.confidence?.score
   if (typeof score === 'number') {
     if (score >= 0.75) return 'high'
     if (score >= 0.45) return 'medium'
@@ -482,6 +511,8 @@ function readField(raw, field) {
   if (!raw) return ''
 
   if (field === 'pos') return raw.pos || raw.upos || ''
+  if (field === 'confidence_score') return raw.confidence?.score ?? raw.confidence_score ?? ''
+  if (field === 'confidence_level') return raw.confidence?.level ?? raw.confidence_level ?? ''
 
   if (field === 'segmentation') {
     const arr =
@@ -506,6 +537,8 @@ function fieldLabel(field) {
   if (field === 'pos') return 'POS'
   if (field === 'segmentation') return 'Segmentation'
   if (field === 'dependency') return 'Dependency'
+  if (field === 'confidence_score') return 'Confidence score'
+  if (field === 'confidence_level') return 'Confidence level'
   if (field === 'case') return 'Case'
   if (field === 'definite') return 'Definite'
   if (field === 'gender') return 'Gender'
@@ -523,20 +556,24 @@ function isArabicField(field) {
 }
 
 function formatCellValue(field, value) {
+  if (value === null || value === undefined || value === '') return missingFieldLabel(field)
   if (Array.isArray(value)) return value.join(' + ')
 
   if (field === 'segmentation') {
     if (Array.isArray(value)) return value.join(' + ')
-    if (!value) return '—'
+    if (!value) return missingFieldLabel(field)
     return String(value)
   }
 
-  if (value === null || value === undefined || value === '') return '—'
   return String(value)
 }
 
 function cellClass(field, value) {
-  return value ? (isArabicField(field) ? 'field-value arabic' : 'field-value') : 'field-value muted'
+  return value === null || value === undefined || value === ''
+    ? 'field-value muted not-recognized'
+    : isArabicField(field)
+      ? 'field-value arabic'
+      : 'field-value'
 }
 
 function statusBadge(toolKey) {
@@ -577,8 +614,33 @@ function confidencePill(value) {
   return 'pill-gray'
 }
 
-function value(item) {
-  return item || '—'
+function severityPill(value) {
+  const normalized = String(value || '').toLowerCase()
+  if (normalized === 'high') return 'pill-red'
+  if (normalized === 'medium') return 'pill-amber'
+  if (normalized === 'low') return 'pill-yellow'
+  return 'pill-gray'
+}
+
+function missingFieldLabel(field) {
+  if (['lemma', 'root', 'pos', 'gloss'].includes(field)) return 'لم يتم التعرف'
+  if (['segmentation', 'dependency'].includes(field)) return 'لا توجد بيانات'
+  return 'لا توجد بيانات'
+}
+
+function displayTokenValue(field, value) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(' + ') : missingFieldLabel(field)
+  }
+  if (value === null || value === undefined || value === '') {
+    return missingFieldLabel(field)
+  }
+  return String(value)
+}
+
+function displayConflictValue(value) {
+  if (value === null || value === undefined || value === '') return 'Not recognized'
+  return String(value)
 }
 
 function metricPercent(value) {
@@ -903,6 +965,12 @@ onMounted(async () => {
 
 .field-value.muted {
   color: var(--muted);
+}
+
+.not-recognized {
+  color: #9ca3af;
+  font-style: italic;
+  font-size: 0.8rem;
 }
 
 .evaluation-grid {

@@ -179,7 +179,7 @@ def normalize_alkhalil_pos(pos: Optional[str]) -> Optional[str]:
     if "ضمير" in compact or "pronoun" in compact:
         return "PRON"
 
-    return _pos_standardize(text)
+    return None
 
 
 
@@ -543,7 +543,8 @@ def normalize_tool_output(tool_name: str, raw_result: Dict[str, Any]) -> Dict[st
                 surface = tok.get("surface")
                 lemma = tok.get("lemma")
                 root = tok.get("root")
-                pos = normalize_alkhalil_pos(tok.get("upos") or tok.get("pos"))
+                raw_pos = tok.get("pos_raw") or tok.get("raw_pos") or tok.get("pos")
+                pos = normalize_alkhalil_pos(raw_pos or tok.get("upos"))
                 gloss = tok.get("gloss")
                 original_surface = tok.get("original_surface")
                 normalized_flag = bool(tok.get("normalized"))
@@ -555,6 +556,7 @@ def normalize_tool_output(tool_name: str, raw_result: Dict[str, Any]) -> Dict[st
                 root = None
                 pos = None
                 gloss = None
+                raw_pos = None
             tokens_out.append(
                 _unified_token(
                     source_tool="alkhalil",
@@ -573,6 +575,7 @@ def normalize_tool_output(tool_name: str, raw_result: Dict[str, Any]) -> Dict[st
                     "original_surface": original_surface,
                     "normalized": normalized_flag,
                     "note": note,
+                    "pos_raw": raw_pos if isinstance(tok, dict) else None,
                     "analyses": _analysis_payload(
                         lemma=lemma,
                         root=root,

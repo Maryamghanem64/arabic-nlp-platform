@@ -159,8 +159,17 @@
                     >
                       {{ line.value }}
                     </span>
+                    <small
+                      v-if="toolKey === 'alkhalil' && row.tools[toolKey].rawPos && row.tools[toolKey].rawPos !== row.tools[toolKey].normalizedPos"
+                      class="pos-raw-hint"
+                      :title="row.tools[toolKey].rawPos"
+                      dir="rtl"
+                      lang="ar"
+                    >
+                      ({{ row.tools[toolKey].rawPos.substring(0, 15) }}...)
+                    </small>
                   </div>
-                  <span v-else class="missing-cell">—</span>
+                  <span v-else class="missing-cell">لم يتم التعرف</span>
                 </td>
               </tr>
             </tbody>
@@ -381,6 +390,8 @@ function normalizeToolCell(toolKey, raw) {
   return {
     available: lines.length > 0,
     lines,
+    rawPos: toolKey === 'alkhalil' ? best.pos_raw || best.raw_pos || best.pos || best.upos || '' : '',
+    normalizedPos: toolKey === 'alkhalil' ? best.pos || best.upos || '' : '',
   }
 }
 
@@ -408,6 +419,7 @@ function normalizeFusionRows(payload) {
     final: row?.final || {},
     sources: row?.sources || {},
     conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
+    notes: Array.isArray(row?.notes) ? row.notes : [],
     confidence: row?.confidence || row?.final?.confidence_level || '',
   }))
 }
@@ -808,6 +820,14 @@ onMounted(() => {
   color: var(--muted);
   font-size: 18px;
   font-weight: 800;
+}
+
+.pos-raw-hint {
+  display: block;
+  font-size: 0.65rem;
+  color: #6b7280;
+  direction: rtl;
+  margin-top: 4px;
 }
 
 .conflict-list {

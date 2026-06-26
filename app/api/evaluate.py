@@ -10,11 +10,16 @@ from fastapi.responses import StreamingResponse
 
 from app.core.startup import run_all_registered_tools, fusion_system, evaluate_tools
 from app.utils.constants import GOLD_DATASET
+from backend.schemas.unified_schema import AnalysisEnvelope
 
 router = APIRouter()
 
 
 _inflight_eval: Dict[str, Any] = {}
+
+
+def _dump_envelope(payload: AnalysisEnvelope) -> dict:
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 @router.get("/evaluate")
@@ -45,12 +50,16 @@ def evaluate(text: str):
             all_tool_results=all_tool_results,
         ),
     }
-    _inflight_eval[key] = payload
-    return {
-        "input": text,
-        "tools": all_tool_results,
-        "evaluation": payload["evaluation"],
-    }
+    envelope = AnalysisEnvelope(
+        input=text,
+        tools=all_tool_results,
+        evaluation=payload["evaluation"],
+        active_tools=sorted([tool for tool, payload in all_tool_results.items() if isinstance(payload, dict) and payload.get("status") == "ok"]),
+        meta={"cached": False, "tool_count": len(all_tool_results)},
+    )
+    dumped = _dump_envelope(envelope)
+    _inflight_eval[key] = dumped
+    return dumped
 
 
 
@@ -80,6 +89,8 @@ def evaluate_dataset():
                 "text": item["text"],
                 "pos_agreement_pct": eval_result["pos_agreement_pct"],
                 "lemma_match_pct": eval_result["lemma_match_pct"],
+                "lemma_exact_match_pct": eval_result["lemma_exact_match_pct"],
+                "lemma_normalized_match_pct": eval_result["lemma_normalized_match_pct"],
                 "pos_f1": eval_result["pos_f1"],
                 "total_words": eval_result["total_words"],
             }

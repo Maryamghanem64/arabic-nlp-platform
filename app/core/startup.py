@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import concurrent.futures
+import os
+import time
 from typing import Any, Callable, Dict
 
-from app.core.tool_registry import ALL_TOOLS, CORE_TOOLS, detect_tool_status, safe_analyze, unavailable_result
+from app.core.tool_registry import ALL_TOOLS, CORE_TOOLS, detect_tool_status, safe_analyze, unavailable_result, unified_result
 from app.services.cache_service import cached_analyze, clear_cache
 from app.services.eval_service import evaluate_tools
 from app.services.fusion_service import fusion_system
@@ -50,20 +52,65 @@ def analyze_tool(tool: str, text: str) -> Dict[str, Any]:
 
 def run_core_tools(text: str) -> Dict[str, Dict[str, Any]]:
     threaded_tools = tuple(tool for tool in CORE_TOOLS if tool != "qalsadi")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(threaded_tools)) as executor:
-        futures = {tool: executor.submit(analyze_tool, tool, text) for tool in threaded_tools}
-        results = {tool: future.result() for tool, future in futures.items()}
+    results = _run_tool_batch(threaded_tools, text, timeout_s=_tool_timeout_seconds())
     results["qalsadi"] = analyze_tool("qalsadi", text)
     return results
 
 
 def run_all_registered_tools(text: str) -> Dict[str, Dict[str, Any]]:
     threaded_tools = tuple(tool for tool in ALL_TOOLS if tool != "qalsadi")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(threaded_tools), 8)) as executor:
-        futures = {tool: executor.submit(analyze_tool, tool, text) for tool in threaded_tools}
-        results = {tool: future.result() for tool, future in futures.items()}
+    results = _run_tool_batch(threaded_tools, text, timeout_s=_tool_timeout_seconds())
     results["qalsadi"] = analyze_tool("qalsadi", text)
     return {tool: results[tool] for tool in ALL_TOOLS}
+
+
+def _tool_timeout_seconds() -> float:
+    raw_value = os.environ.get("ARABIC_NLP_TOOL_TIMEOUT_SECONDS", "12")
+    try:
+        return max(3.0, min(float(raw_value), 45.0))
+    except (TypeError, ValueError):
+        return 12.0
+
+
+def _timed_out_result(tool: str, timeout_s: float, text: str) -> Dict[str, Any]:
+    payload = unified_result(
+        tool=tool,
+        status="timeout",
+        tokens=[],
+        lemmas=[],
+        pos=[],
+        reason=f"{tool} exceeded the {timeout_s:g}s demo safety timeout.",
+    )
+    payload["input"] = text
+    payload["word_count"] = 0
+    payload["runtime_ms"] = int(timeout_s * 1000)
+    return payload
+
+
+def _run_tool_batch(tools: tuple[str, ...], text: str, *, timeout_s: float) -> Dict[str, Dict[str, Any]]:
+    started_at = time.perf_counter()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(len(tools), 8)))
+    futures = {tool: executor.submit(analyze_tool, tool, text) for tool in tools}
+    done, pending = concurrent.futures.wait(futures.values(), timeout=timeout_s)
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for tool, future in futures.items():
+        if future in done:
+            try:
+                result = future.result()
+                if isinstance(result, dict):
+                    result.setdefault("runtime_ms", int((time.perf_counter() - started_at) * 1000))
+                results[tool] = result
+            except Exception as exc:
+                results[tool] = unified_result(tool=tool, status="error", tokens=[], lemmas=[], pos=[], reason=str(exc))
+        else:
+            future.cancel()
+            results[tool] = _timed_out_result(tool, timeout_s, text)
+
+    # Do not wait for non-cooperative third-party analyzers. They are isolated
+    # behind timeout results so API responses remain demo-safe.
+    executor.shutdown(wait=False, cancel_futures=True)
+    return results
 
 
 import threading

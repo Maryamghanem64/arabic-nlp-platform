@@ -4,8 +4,13 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.startup import analyze_tool, get_tool_statuses, run_all_registered_tools
 from app.core.tool_registry import ALL_TOOLS, log_startup_report
+from backend.schemas.unified_schema import AnalysisEnvelope
 
 router = APIRouter()
+
+
+def _dump_envelope(payload: AnalysisEnvelope) -> dict:
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 @router.get("/")
@@ -99,5 +104,14 @@ def analyze_combined(text: str):
 
     # Run all registered tools in parallel (includes arabert/alkhalil/udpipe/madamira)
     results = run_all_registered_tools(text)
-    return {"input": text, **results}
+    envelope = AnalysisEnvelope(
+        input=text,
+        tools=results,
+        active_tools=sorted([name for name, payload in results.items() if isinstance(payload, dict) and payload.get("status") == "ok"]),
+        meta={
+            "active_tools": sorted([name for name, payload in results.items() if isinstance(payload, dict) and payload.get("status") == "ok"]),
+            "tool_count": len(results),
+        },
+    )
+    return _dump_envelope(envelope)
 

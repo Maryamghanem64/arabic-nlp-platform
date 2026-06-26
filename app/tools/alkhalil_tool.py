@@ -651,6 +651,46 @@ def _parse_alkhalil_output(stdout: str) -> List[Dict[str, Any]]:
     return tokens
 
 
+def _finalize_alkhalil_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize the final AlKhalil payload so `pos` is UPOS and the raw tag is preserved."""
+    if not isinstance(result, dict):
+        return result
+
+    tokens = result.get("tokens")
+    if not isinstance(tokens, list):
+        return result
+
+    finalized_tokens: List[Dict[str, Any]] = []
+    for tok in tokens:
+        if not isinstance(tok, dict):
+            finalized_tokens.append(tok)
+            continue
+
+        token = dict(tok)
+        raw_pos = token.get("pos_raw") or token.get("raw_pos") or token.get("pos") or token.get("upos")
+        normalized_pos = _normalize_alkhalil_pos(raw_pos)
+
+        if raw_pos:
+            token["pos_raw"] = raw_pos
+        if normalized_pos:
+            token["pos"] = normalized_pos
+        elif token.get("upos"):
+            token["pos"] = token.get("upos")
+        else:
+            token["pos"] = None
+
+        if isinstance(token.get("analyses"), list):
+            for analysis in token["analyses"]:
+                if isinstance(analysis, dict) and token.get("pos"):
+                    analysis["pos"] = token["pos"]
+
+        finalized_tokens.append(token)
+
+    finalized = dict(result)
+    finalized["tokens"] = finalized_tokens
+    return finalized
+
+
 def alkhalil_analyze(text: str) -> Dict[str, Any]:
     tool = "alkhalil"
     try:
@@ -686,14 +726,14 @@ def alkhalil_analyze(text: str) -> Dict[str, Any]:
         try:
             bridge_result = _bridge_analyze(text or "", jar_path)
             if bridge_result.get("status") == "ok" and bridge_result.get("tokens"):
-                return bridge_result
+                return _finalize_alkhalil_result(bridge_result)
             bridge_reason = bridge_result.get("reason") or "AlKhalil bridge returned no tokens."
             logger.warning("[AlKhalil] bridge returned fallback-worthy result: %s", bridge_reason)
         except Exception as exc:
             bridge_reason = str(exc)
             logger.warning("[AlKhalil] bridge failed: %s", bridge_reason)
 
-        return _pyarabic_fallback(text or "", f"Real AlKhalil bridge failed: {bridge_reason}")
+        return _finalize_alkhalil_result(_pyarabic_fallback(text or "", f"Real AlKhalil bridge failed: {bridge_reason}"))
 
     except Exception as e:
         logger.exception("[AlKhalil] error")

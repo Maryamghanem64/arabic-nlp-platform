@@ -72,3 +72,17 @@ class EvaluationSummary(BaseModel):
     lemma_match_pct: str
     segmentation_coverage: float
 
+
+class AnalysisEnvelope(BaseModel):
+    """
+    Unified response envelope for analysis endpoints.
+    Fields not applicable to a specific endpoint remain empty or null.
+    """
+    input: str
+    tools: Dict[str, Any] = Field(default_factory=dict)
+    fusion: Optional[List[Dict[str, Any]]] = None
+    comparison: Optional[List[Dict[str, Any]]] = None
+    evaluation: Optional[Dict[str, Any]] = None
+    active_tools: Optional[List[str]] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+

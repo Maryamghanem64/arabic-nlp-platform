@@ -12,7 +12,7 @@ from app.utils.helpers import (
 )
 
 _NON_CONTENT_POS = {"CCONJ", "SCONJ", "PART", "PUNCT", "SYM"}
-_TOOL_RELIABILITY = {
+TOOL_WEIGHTS = {
     "camel": 0.35,
     "stanza": 0.35,
     "udpipe": 0.15,
@@ -142,7 +142,7 @@ def _weighted_majority_ratio(values_by_tool: Dict[str, Optional[str]], *, normal
         if not text or text == "X":
             continue
 
-        weight = float(_TOOL_RELIABILITY.get(tool_name, 0.0))
+        weight = float(TOOL_WEIGHTS.get(tool_name, 0.0))
         if weight <= 0:
             continue
 
@@ -154,6 +154,31 @@ def _weighted_majority_ratio(values_by_tool: Dict[str, Optional[str]], *, normal
 
     majority = max(counts.values()) if counts else 0.0
     return majority / total_weight, majority, 1
+
+
+def weighted_pos_agreement(tool_pos_map: Dict[str, Optional[str]]) -> float:
+    """
+    Compute weighted POS agreement across tools.
+    Excludes tools that returned None or 'X' from both numerator and denominator.
+    Returns float 0.0-1.0.
+    """
+    votes: List[tuple[str, float]] = []
+    for tool, pos in tool_pos_map.items():
+        if not pos or pos == "X":
+            continue
+        weight = TOOL_WEIGHTS.get(tool, 0.05)
+        votes.append((pos, weight))
+
+    if not votes:
+        return 0.0
+
+    total_weight = sum(w for _, w in votes)
+    pos_scores: Dict[str, float] = {}
+    for pos, weight in votes:
+        pos_scores[pos] = pos_scores.get(pos, 0.0) + weight
+
+    winner_weight = max(pos_scores.values())
+    return round(winner_weight / total_weight, 3)
 
 
 def _preferred_lemma(tok: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -299,17 +324,16 @@ def compute_agreements(
         if not ref:
             continue
 
-        pos_ratio, _pos_majority, pos_weight = _weighted_majority_ratio(
+        pos_ratio = weighted_pos_agreement(
             {
                 "camel": extract_pos(camel),
                 "stanza": extract_pos(stanza),
                 "qalsadi": extract_pos(qalsadi),
                 "alkhalil": extract_pos(alkhalil),
                 "udpipe": extract_pos(udpipe),
-            },
-            normalize=normalize_pos_for_compare,
+            }
         )
-        if pos_weight:
+        if pos_ratio > 0:
             pos_agree_sum += pos_ratio
             pos_total += 1
 

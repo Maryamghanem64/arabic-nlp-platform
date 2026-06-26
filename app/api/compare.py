@@ -3,17 +3,80 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.startup import run_all_registered_tools
+from app.utils.helpers import normalize_lemma_for_compare, normalize_pos_for_compare
 from backend.services.alignment_engine import align_tools
 from backend.services.comparison_service import build_conflicts
 from backend.services.normalizer import normalize_tool_output
+from backend.schemas.unified_schema import AnalysisEnvelope
 
 router = APIRouter()
 
 VALID_COMPARE_TOOLS = {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe"}
 
 
+def _dump_envelope(payload: AnalysisEnvelope) -> dict:
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+
+
 def _parse_tools(tools: str) -> list[str]:
     return [t.strip().lower() for t in tools.split(",") if t.strip()]
+
+
+def _token_value(token: dict | None, key: str) -> str | None:
+    if not token:
+        return None
+    value = token.get(key)
+    if value is not None and str(value).strip():
+        return str(value).strip()
+    analyses = token.get("analyses") or []
+    if analyses and isinstance(analyses[0], dict):
+        nested = analyses[0].get(key)
+        if nested is not None and str(nested).strip():
+            return str(nested).strip()
+    return None
+
+
+def _group_feature(row_tools: dict, feature: str) -> dict:
+    values_by_tool = {
+        tool: _token_value(token, "upos" if feature == "pos" and not _token_value(token, "pos") else feature)
+        for tool, token in row_tools.items()
+        if token
+    }
+    normalizer = normalize_pos_for_compare if feature == "pos" else normalize_lemma_for_compare if feature == "lemma" else lambda v: str(v).strip()
+    groups: dict[str, dict] = {}
+    for tool, value in values_by_tool.items():
+        if not value:
+            continue
+        normalized = normalizer(value)
+        if not normalized:
+            continue
+        groups.setdefault(normalized, {"value": value, "tools": []})["tools"].append(tool)
+
+    status = "missing"
+    if len(groups) == 1 and groups:
+        status = "agreement"
+    elif len(groups) > 1:
+        status = "conflict"
+    elif values_by_tool:
+        status = "partial"
+
+    return {"status": status, "groups": list(groups.values()), "values_by_tool": values_by_tool}
+
+
+def _educational_notes(row_tools: dict, conflicts: list[dict]) -> list[str]:
+    notes: list[str] = []
+    lemma = _group_feature(row_tools, "lemma")
+    pos = _group_feature(row_tools, "pos")
+
+    if lemma["status"] == "conflict":
+        notes.append("Lemma disagreement often reflects different normalization choices: some analyzers return a dictionary lemma, while others preserve gender, number, or diacritics from the surface token.")
+    if pos["status"] == "conflict":
+        notes.append("POS disagreement usually comes from different tagsets and context models: morphology-first tools may prefer lexical category, while UD parsers prefer syntactic function in context.")
+    if any(conflict.get("feature") == "pos" for conflict in conflicts):
+        notes.append("Treat POS conflicts as high-value evidence: they change downstream syntax, agreement metrics, and fusion confidence.")
+    if not notes and row_tools.get("farasa") and _token_value(row_tools.get("farasa"), "segmentation"):
+        notes.append("Segmentation evidence is mainly clitic evidence; it should be compared with lemma/POS before trusting a fused analysis.")
+    return notes
 
 
 @router.get("/compare")
@@ -49,19 +112,32 @@ def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi,alkhalil,
             alkhalil_tok=row.tools.get("alkhalil"),
             udpipe_tok=row.tools.get("udpipe"),
         )
+        row_tools = {tool: row.tools.get(tool) or {} for tool in tools_tokens.keys()}
         comparison.append(
             {
                 "index": index,
                 "word": row.base.get("surface") or f"#{index + 1}",
-                "tools": {tool: row.tools.get(tool) or {} for tool in tools_tokens.keys()},
+                "tools": row_tools,
                 "conflicts": row_conflicts,
+                "agreement": {
+                    "lemma": _group_feature(row_tools, "lemma"),
+                    "root": _group_feature(row_tools, "root"),
+                    "pos": _group_feature(row_tools, "pos"),
+                },
+                "educational_notes": _educational_notes(row_tools, row_conflicts),
             }
         )
 
-    return {
-        "input": text,
-        "comparison": comparison,
-        "active_tools": present_tools,
-        "normalized_tools": {tool: normalized.get(tool, {}) for tool in requested},
-        "base_tool": base_tool,
-    }
+    envelope = AnalysisEnvelope(
+        input=text,
+        tools={tool: normalized.get(tool, {}) for tool in requested},
+        comparison=comparison,
+        active_tools=present_tools,
+        meta={
+            "active_tools": present_tools,
+            "degraded_tools": [tool for tool, payload in all_results.items() if isinstance(payload, dict) and payload.get("status") not in {"ok"}],
+            "base_tool": base_tool,
+            "requested_tools": requested,
+        },
+    )
+    return _dump_envelope(envelope)

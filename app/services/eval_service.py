@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from app.utils.helpers import classify_conflict, normalize_lemma_for_compare, normalize_pos_for_compare
 from backend.services.alignment_engine import align_tools, compute_agreements
 
+
+def strip_diacritics(text: str) -> str:
+    """Remove Arabic diacritics (tashkeel) for normalized comparison."""
+    if not text:
+        return text
+    return re.sub(r"[\u0610-\u061a\u064b-\u065f\u0670]", "", text)
+
+
+def lemma_equivalent(a: str | None, b: str | None) -> bool:
+    """Normalized lemma comparison: strip diacritics then compare."""
+    if not a or not b:
+        return False
+    return strip_diacritics(a.strip()) == strip_diacritics(b.strip())
 
 
 
@@ -27,7 +41,7 @@ def evaluate_tools(
 
     Also reports excluded_tools based on statuses of *all* tools.
     """
-    excluded = {"error", "unavailable", "future_work", "lazy", "disabled"}
+    excluded = {"error", "unavailable", "future_work", "lazy", "disabled", "timeout"}
     metric_tools = ("camel", "farasa", "stanza", "qalsadi", "udpipe")
 
     if all_tool_results is None:
@@ -126,7 +140,7 @@ def evaluate_tools(
 
             c_lemma = normalize_lemma_for_compare(camel_ana.get("lemma"))
             s_lemma = normalize_lemma_for_compare(stanza_tok.get("lemma"))
-            if c_lemma and s_lemma and c_lemma != s_lemma:
+            if c_lemma and s_lemma and not lemma_equivalent(c_lemma, s_lemma):
                 all_conflicts.append(classify_conflict("lemma", c_lemma, s_lemma))
 
     result = {

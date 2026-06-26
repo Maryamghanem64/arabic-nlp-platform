@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
+from pydantic import BaseModel, Field
+
 
 class DependencyTD(TypedDict):
     head: Optional[int]
@@ -60,4 +62,14 @@ class UnifiedToolOkTD(TypedDict, total=False):
 
 
 UnifiedToolResponseTD = Dict[str, Any]
+
+
+class AnalysisEnvelope(BaseModel):
+    input: str
+    tools: Dict[str, Any] = Field(default_factory=dict)
+    fusion: Optional[Any] = None
+    comparison: Optional[Any] = None
+    evaluation: Optional[Any] = None
+    active_tools: Optional[List[str]] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
