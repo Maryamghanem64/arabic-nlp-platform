@@ -5,7 +5,10 @@
         <span class="eyebrow">Evaluation report</span>
         <h1 class="hero-title">Scientific tool agreement and coverage analysis.</h1>
         <p class="hero-copy">
-          Evaluate POS agreement, lemma match, segmentation coverage, and conflict density on one Arabic sentence.
+          The page reports direct analyzer-derived metrics for agreement, coverage, active tools, and runtime.
+        </p>
+        <p class="page-note">
+          Results shown on this page are computed directly from analyzer outputs. No AI-generated interpretation is used.
         </p>
       </div>
     </section>
@@ -23,7 +26,7 @@
           id="eval-input"
           v-model="inputText"
           class="arabic-input"
-          placeholder="Example: قرأ الطالب الكتب في المكتبة"
+          placeholder="Example: \u0642\u0631\u0623 \u0627\u0644\u0637\u0627\u0644\u0628 \u0627\u0644\u0643\u062a\u0628 \u0641\u064a \u0627\u0644\u0645\u0643\u062a\u0628\u0629"
           rows="2"
           dir="rtl"
           lang="ar"
@@ -86,7 +89,7 @@
         <ScientificChart
           type="radar"
           title="Overall Evaluation"
-          subtitle="Agreement, lemma, and coverage quality."
+          subtitle="Agreement, lemma, and coverage values."
           badge="Score"
           :labels="overallRadar.labels"
           :datasets="overallRadar.datasets"
@@ -99,7 +102,7 @@
         <ScientificChart
           type="bar"
           title="Performance Snapshot"
-          subtitle="Accuracy and coverage at a glance."
+          subtitle="Agreement and coverage at a glance."
           badge="Metrics"
           :labels="performanceBar.labels"
           :datasets="performanceBar.datasets"
@@ -126,9 +129,12 @@
       <section class="panel panel-pad report-panel">
         <div class="section-head">
           <div>
-            <h2 class="section-title">Evaluation Summary</h2>
-            <p class="section-subtitle">This is the committee-friendly snapshot of the backend evaluation output.</p>
+            <h2 class="section-title">Metrics Summary</h2>
+            <p class="section-subtitle">Direct counts and availability indicators from the current run.</p>
           </div>
+          <a class="methodology-link" href="/docs/evaluation_methodology.md" target="_blank" rel="noreferrer">
+            Evaluation methodology
+          </a>
         </div>
 
         <div class="report-grid">
@@ -161,35 +167,8 @@
           </article>
 
           <article class="report-card">
-            <span class="report-label">Benchmark note</span>
+            <span class="report-label">Raw note</span>
             <p class="metrics-note">{{ rawNote || 'The backend did not return an additional note for this run.' }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel panel-pad conclusions-panel">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">Scientific Conclusions</h2>
-            <p class="section-subtitle">A compact defense-ready interpretation of the current run.</p>
-          </div>
-        </div>
-        <div class="conclusion-grid">
-          <article class="conclusion-card">
-            <strong>Agreement quality</strong>
-            <p>{{ conclusionText.agreement }}</p>
-          </article>
-          <article class="conclusion-card">
-            <strong>Coverage quality</strong>
-            <p>{{ conclusionText.coverage }}</p>
-          </article>
-          <article class="conclusion-card">
-            <strong>Runtime note</strong>
-            <p>{{ conclusionText.runtime }}</p>
-          </article>
-          <article class="conclusion-card">
-            <strong>Defense takeaway</strong>
-            <p>{{ conclusionText.takeaway }}</p>
           </article>
         </div>
       </section>
@@ -216,8 +195,8 @@ const rawNote = ref('')
 const requestDuration = ref(0)
 
 const EXAMPLE_SENTENCES = [
-  'قرأ الطالب الكتب في المكتبة',
-  'وجدت المعلمة طالبة مجتهدة في الفصل',
+  '\u0642\u0631\u0623 \u0627\u0644\u0637\u0627\u0644\u0628 \u0627\u0644\u0643\u062a\u0628 \u0641\u064a \u0627\u0644\u0645\u0643\u062a\u0628\u0629',
+  '\u0648\u062c\u062f\u062a \u0627\u0644\u0645\u0639\u0644\u0645\u0629 \u0637\u0627\u0644\u0628\u0629 \u0645\u062c\u062a\u0647\u062f\u0629 \u0641\u064a \u0627\u0644\u0641\u0635\u0644',
 ]
 
 const overallRadar = computed(() => ({
@@ -225,12 +204,14 @@ const overallRadar = computed(() => ({
   datasets: [
     {
       label: 'Score %',
-      data: evalResult.value ? [
-        toPercent(evalResult.value.pos_agreement),
-        toPercent(evalResult.value.lemma_normalized_match),
-        toPercent(evalResult.value.segmentation_coverage),
-        toPercent(evalResult.value.lemma_exact_match),
-      ] : [0, 0, 0, 0],
+      data: evalResult.value
+        ? [
+            toPercent(evalResult.value.pos_agreement),
+            toPercent(evalResult.value.lemma_normalized_match),
+            toPercent(evalResult.value.segmentation_coverage),
+            toPercent(evalResult.value.lemma_exact_match),
+          ]
+        : [0, 0, 0, 0],
       borderColor: '#14B8A6',
       backgroundColor: 'rgba(20, 184, 166, 0.16)',
     },
@@ -242,12 +223,14 @@ const performanceBar = computed(() => ({
   datasets: [
     {
       label: 'Percentage',
-      data: evalResult.value ? [
-        toPercent(evalResult.value.pos_agreement),
-        toPercent(evalResult.value.lemma_normalized_match),
-        toPercent(evalResult.value.segmentation_coverage),
-        toPercent(evalResult.value.lemma_exact_match),
-      ] : [0, 0, 0, 0],
+      data: evalResult.value
+        ? [
+            toPercent(evalResult.value.pos_agreement),
+            toPercent(evalResult.value.lemma_normalized_match),
+            toPercent(evalResult.value.segmentation_coverage),
+            toPercent(evalResult.value.lemma_exact_match),
+          ]
+        : [0, 0, 0, 0],
       backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED'],
     },
   ],
@@ -268,31 +251,6 @@ const runtimeBar = computed(() => ({
   ],
 }))
 
-const conclusionText = computed(() => {
-  const agreement = evalResult.value ? toPercent(evalResult.value.pos_agreement) : 0
-  const coverage = evalResult.value ? toPercent(evalResult.value.segmentation_coverage) : 0
-  return {
-    agreement:
-      agreement >= 80
-        ? 'The current run shows strong agreement across the active analyzers.'
-        : agreement >= 60
-          ? 'The current run is moderately consistent and merits token-level inspection.'
-          : 'The current run shows low agreement and should be reviewed carefully.',
-    coverage:
-      coverage >= 80
-        ? 'Segmentation coverage is strong enough for comparative analysis.'
-        : coverage >= 50
-          ? 'Coverage is usable but uneven across the sentence.'
-          : 'Coverage is limited and may affect downstream interpretation.',
-    runtime:
-      requestDuration.value
-        ? `The last evaluation completed in ${requestDuration.value} ms on the current frontend session.`
-        : 'Runtime was not captured for this run.',
-    takeaway:
-      rawNote.value || 'The evaluation should be paired with compare and fusion views during the defense.',
-  }
-})
-
 async function runEvaluation() {
   if (!inputText.value.trim()) return
   loading.value = true
@@ -311,31 +269,29 @@ async function runEvaluation() {
     })
     requestDuration.value = Math.round(performance.now() - started)
 
-    // Backend returns { input, evaluation: { ... } }
-    // or flat { pos_agreement, lemma_match, ... }
     const raw = data?.evaluation || data
 
     evalResult.value = {
-      pos_agreement:        toScalar(raw.pos_agreement ?? raw.pos_agreement_pct),
+      pos_agreement: toScalar(raw.pos_agreement ?? raw.pos_agreement_pct),
       lemma_normalized_match: toScalar(
         raw.lemma_normalized_match ??
-        raw.lemma_normalized_match_pct ??
-        raw.lemma_match ??
-        raw.lemma_match_pct
+          raw.lemma_normalized_match_pct ??
+          raw.lemma_match ??
+          raw.lemma_match_pct,
       ),
       lemma_exact_match: toScalar(
         raw.lemma_exact_match ??
-        raw.lemma_exact_match_pct ??
-        raw.lemma_match ??
-        raw.lemma_match_pct
+          raw.lemma_exact_match_pct ??
+          raw.lemma_match ??
+          raw.lemma_match_pct,
       ),
       segmentation_coverage: toScalar(raw.segmentation_coverage),
     }
 
-    activeTools.value  = raw.active_tools  || data.active_tools  || []
+    activeTools.value = raw.active_tools || data.active_tools || []
     excludedTools.value = raw.excluded_tools || data.excluded_tools || []
-    posConflicts.value  = raw.pos_conflicts  || raw.all_conflicts  || []
-    rawNote.value       = raw.metrics_note   || ''
+    posConflicts.value = raw.pos_conflicts || raw.all_conflicts || []
+    rawNote.value = raw.metrics_note || ''
 
     recordAnalysis({
       page: 'Evaluate',
@@ -354,19 +310,17 @@ function runExample(example) {
   runEvaluation()
 }
 
-// Convert any backend value (0-1 float, "67.0%", or 0-100 int) → 0-1 scalar
 function toScalar(value) {
   if (value == null) return 0
   if (typeof value === 'number') return value > 1 ? value / 100 : value
   if (typeof value === 'string') {
-    const n = parseFloat(value.replace('%', ''))
-    if (!isFinite(n)) return 0
+    const n = Number.parseFloat(value.replace('%', ''))
+    if (!Number.isFinite(n)) return 0
     return n > 1 ? n / 100 : n
   }
   return 0
 }
 
-// 0-1 scalar → 0-100 number (for charts)
 function toPercent(scalar) {
   return Math.round(toScalar(scalar) * 100)
 }
@@ -378,15 +332,15 @@ function percentLabel(score, digits = 1) {
 function getScoreClass(score) {
   const n = toScalar(score)
   if (n >= 0.85) return 'score-high'
-  if (n >= 0.6)  return 'score-medium'
+  if (n >= 0.6) return 'score-medium'
   return 'score-low'
 }
 
 function conflictText(conflict) {
   const valueA = conflict.tool_a_value || conflict.value_a || conflict.camel_pos || ''
   const valueB = conflict.tool_b_value || conflict.value_b || conflict.stanza_pos || ''
-  const toolA  = conflict.tool_a || 'CAMeL'
-  const toolB  = conflict.tool_b || 'Stanza'
+  const toolA = conflict.tool_a || 'CAMeL'
+  const toolB = conflict.tool_b || 'Stanza'
   return `${toolA}: ${valueA || '-'} / ${toolB}: ${valueB || '-'}`
 }
 </script>
@@ -403,6 +357,17 @@ function conflictText(conflict) {
 
 .input-section {
   margin-bottom: 0;
+}
+
+.page-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--c-accent-border);
+  border-radius: 10px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .input-row {
@@ -510,9 +475,17 @@ function conflictText(conflict) {
   font-weight: 700;
 }
 
-.kpi-value.score-high   { color: #059669; }
-.kpi-value.score-medium { color: #D97706; }
-.kpi-value.score-low    { color: #DC2626; }
+.kpi-value.score-high {
+  color: #059669;
+}
+
+.kpi-value.score-medium {
+  color: #D97706;
+}
+
+.kpi-value.score-low {
+  color: #DC2626;
+}
 
 .kpi-note {
   color: var(--c-text-muted);
@@ -546,6 +519,16 @@ function conflictText(conflict) {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.methodology-link {
+  align-self: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: var(--c-accent-text);
+  background: var(--c-accent-light);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .tool-row {
@@ -587,36 +570,6 @@ function conflictText(conflict) {
   line-height: 1.55;
 }
 
-.conclusions-panel {
-  margin-top: 0;
-}
-
-.conclusion-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.conclusion-card {
-  padding: 14px;
-  border: 1px solid var(--c-border);
-  border-radius: 14px;
-  background: var(--c-page-bg);
-}
-
-.conclusion-card strong {
-  display: block;
-  color: var(--c-text-primary);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.conclusion-card p {
-  margin: 6px 0 0;
-  color: var(--c-text-secondary);
-  line-height: 1.55;
-}
-
 .null-value {
   color: var(--c-text-muted);
   font-size: 13px;
@@ -626,21 +579,23 @@ function conflictText(conflict) {
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .analysis-visual-grid {
+
+  .analysis-visual-grid,
+  .report-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 760px) {
-  .input-row,
-  .report-grid,
-  .conclusion-grid {
+  .input-row {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
+
   .run-btn {
     width: 100%;
   }
+
   .kpi-grid {
     grid-template-columns: 1fr 1fr;
   }

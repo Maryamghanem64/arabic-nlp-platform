@@ -1,5 +1,5 @@
 <template>
-  <span class="empty-cell">لم يتم التعرف</span>
+  <span class="empty-cell">—</span>
 </template>
 
 <style scoped>
