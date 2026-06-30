@@ -3,14 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.core.startup import run_all_registered_tools
+from app.models.api_response import dump_envelope, success_response
 from app.services.fusion_service import fusion_system
 from backend.schemas.unified_schema import AnalysisEnvelope
 
 router = APIRouter()
-
-
-def _dump_envelope(payload: AnalysisEnvelope) -> dict:
-    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 @router.get("/fusion")
@@ -38,5 +35,5 @@ def fusion_endpoint(text: str):
             "degraded_tools": [tool for tool, payload in all_tool_results.items() if isinstance(payload, dict) and payload.get("status") != "ok"],
         },
     )
-    return _dump_envelope(envelope)
+    return success_response(dump_envelope(envelope), message="Fusion analysis completed")
 

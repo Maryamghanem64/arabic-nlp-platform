@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.startup import run_all_registered_tools
+from app.models.api_response import dump_envelope, success_response
 from app.utils.helpers import normalize_lemma_for_compare, normalize_pos_for_compare
 from backend.services.alignment_engine import align_tools
 from backend.services.comparison_service import build_conflicts
@@ -12,10 +13,6 @@ from backend.schemas.unified_schema import AnalysisEnvelope
 router = APIRouter()
 
 VALID_COMPARE_TOOLS = {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe"}
-
-
-def _dump_envelope(payload: AnalysisEnvelope) -> dict:
-    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 def _parse_tools(tools: str) -> list[str]:
@@ -140,4 +137,4 @@ def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi,alkhalil,
             "requested_tools": requested,
         },
     )
-    return _dump_envelope(envelope)
+    return success_response(dump_envelope(envelope), message="Comparison completed")

@@ -310,7 +310,7 @@ import { evaluateText, fusionText } from '@/api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS } from '@/config/tools'
 import { useToolStatus } from '@/composables/useToolStatus'
 import { TOOL_GROUPS } from '@/constants/designTokens'
-import ScientificChart from '@/components/ScientificChart.vue'
+import ScientificChart from '@/components/charts/ScientificChart.vue'
 import { readAnalysisHistory } from '@/utils/analysisHistory'
 
 const { toolStatuses, activeTools, loading: statusLoading, error: statusError, refresh } = useToolStatus()

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.startup import cached_analyze, camel_analyze, farasa_analyze, stanza_analyze, qalsadi_analyze
+from app.models.api_response import success_response
 from app.tools.alkhalil_tool import alkhalil_analyze
 from app.tools.udpipe_tool import udpipe_analyze
 
@@ -126,7 +127,7 @@ def ui_analyze(tool: str, text: str):
         else:
             rows.append({"word": t.get("surface"), "lemma": placeholder(t.get("lemma")), "root": placeholder(t.get("root")), "pos": safe_pos(t.get("pos"))})
 
-    return {"tool": tool_l, "rows": rows}
+    return success_response({"tool": tool_l, "rows": rows}, message="UI analysis rows loaded")
 
 
 @router.get("/ui/compare")
@@ -181,7 +182,18 @@ def ui_compare(text: str, tools: str = Query("camel,stanza,qalsadi,farasa")):
         row["agreement"] = _agreement_for_row(aligned_row=at)
         rows.append(row)
 
-    return {"summary": {"pos_agreement": agreements.get("pos_agreement", 0), "lemma_agreement": agreements.get("lemma_agreement", 0), "root_agreement": agreements.get("root_agreement", 0), "token_count": agreements.get("token_count", len(rows))}, "rows": rows}
+    return success_response(
+        {
+            "summary": {
+                "pos_agreement": agreements.get("pos_agreement", 0),
+                "lemma_agreement": agreements.get("lemma_agreement", 0),
+                "root_agreement": agreements.get("root_agreement", 0),
+                "token_count": agreements.get("token_count", len(rows)),
+            },
+            "rows": rows,
+        },
+        message="UI comparison rows loaded",
+    )
 
 
 @router.get("/ui/fusion")
@@ -262,5 +274,5 @@ def ui_fusion(text: str):
             }
         )
 
-    return {"rows": rows}
+    return success_response({"rows": rows}, message="UI fusion rows loaded")
 

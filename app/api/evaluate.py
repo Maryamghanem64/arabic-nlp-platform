@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.core.startup import run_all_registered_tools, fusion_system, evaluate_tools
+from app.models.api_response import dump_envelope, success_response
 from app.utils.constants import GOLD_DATASET
 from backend.schemas.unified_schema import AnalysisEnvelope
 
@@ -16,10 +17,6 @@ router = APIRouter()
 
 
 _inflight_eval: Dict[str, Any] = {}
-
-
-def _dump_envelope(payload: AnalysisEnvelope) -> dict:
-    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
 
 @router.get("/evaluate")
@@ -30,7 +27,7 @@ def evaluate(text: str):
     key = f"evaluate::{text}"
     cached = _inflight_eval.get(key)
     if cached is not None:
-        return cached
+        return success_response(cached, message="Evaluation loaded from cache", metadata={"cached": True})
 
     all_tool_results = run_all_registered_tools(text)
     camel_res = all_tool_results.get("camel", {})
@@ -57,9 +54,9 @@ def evaluate(text: str):
         active_tools=sorted([tool for tool, payload in all_tool_results.items() if isinstance(payload, dict) and payload.get("status") == "ok"]),
         meta={"cached": False, "tool_count": len(all_tool_results)},
     )
-    dumped = _dump_envelope(envelope)
+    dumped = dump_envelope(envelope)
     _inflight_eval[key] = dumped
-    return dumped
+    return success_response(dumped, message="Evaluation completed")
 
 
 
@@ -97,12 +94,12 @@ def evaluate_dataset():
         )
 
     avg_f1 = sum(r["pos_f1"] for r in results) / len(results)
-    return {
+    return success_response({
         "total_sentences": len(results),
         "average_f1": round(avg_f1, 3),
         "average_f1_pct": f"{round(avg_f1 * 100, 1)}%",
         "results": results,
-    }
+    }, message="Dataset evaluation completed")
 
 
 @router.get("/export")
@@ -191,5 +188,5 @@ def cache_clear():
     from app.core.startup import clear_cache
 
     clear_cache()
-    return {"status": "cache cleared"}
+    return success_response({"cleared": True}, message="Cache cleared")
 

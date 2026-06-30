@@ -200,15 +200,19 @@
 <script setup>
 import { computed, ref } from 'vue'
 import axios from 'axios'
-import ToolBadge from '@/components/ToolBadge.vue'
-import ScientificChart from '@/components/ScientificChart.vue'
+import ToolBadge from '@/components/badges/ToolBadge.vue'
+import ScientificChart from '@/components/charts/ScientificChart.vue'
 import { API_BASE_URL } from '@/api/nlpApi'
 import { recordAnalysis } from '@/utils/analysisHistory'
 
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
-const payload = ref(null)
+const evalResult = ref(null)
+const activeTools = ref([])
+const excludedTools = ref([])
+const posConflicts = ref([])
+const rawNote = ref('')
 const requestDuration = ref(0)
 
 const EXAMPLE_SENTENCES = [
@@ -216,42 +220,39 @@ const EXAMPLE_SENTENCES = [
   'وجدت المعلمة طالبة مجتهدة في الفصل',
 ]
 
-const evalResult = computed(() => (payload.value ? normalizeEvaluation(payload.value) : null))
-const activeTools = computed(() => payload.value?.active_tools || evalResult.value?.active_tools || [])
-const excludedTools = computed(() => evalResult.value?.excluded_tools || payload.value?.meta?.degraded_tools || [])
-const posConflicts = computed(() => evalResult.value?.pos_conflicts || [])
-const rawNote = computed(() => evalResult.value?.metrics_note || '')
 const overallRadar = computed(() => ({
   labels: ['POS', 'Lemma match', 'Coverage', 'Exact lemma'],
   datasets: [
     {
       label: 'Score %',
-      data: [
-        metricPercent(evalResult.value?.pos_agreement),
-        metricPercent(evalResult.value?.lemma_normalized_match),
-        metricPercent(evalResult.value?.segmentation_coverage),
-        metricPercent(evalResult.value?.lemma_exact_match),
-      ],
+      data: evalResult.value ? [
+        toPercent(evalResult.value.pos_agreement),
+        toPercent(evalResult.value.lemma_normalized_match),
+        toPercent(evalResult.value.segmentation_coverage),
+        toPercent(evalResult.value.lemma_exact_match),
+      ] : [0, 0, 0, 0],
       borderColor: '#14B8A6',
       backgroundColor: 'rgba(20, 184, 166, 0.16)',
     },
   ],
 }))
+
 const performanceBar = computed(() => ({
   labels: ['POS', 'Lemma', 'Coverage', 'Exact'],
   datasets: [
     {
       label: 'Percentage',
-      data: [
-        metricPercent(evalResult.value?.pos_agreement),
-        metricPercent(evalResult.value?.lemma_normalized_match),
-        metricPercent(evalResult.value?.segmentation_coverage),
-        metricPercent(evalResult.value?.lemma_exact_match),
-      ],
+      data: evalResult.value ? [
+        toPercent(evalResult.value.pos_agreement),
+        toPercent(evalResult.value.lemma_normalized_match),
+        toPercent(evalResult.value.segmentation_coverage),
+        toPercent(evalResult.value.lemma_exact_match),
+      ] : [0, 0, 0, 0],
       backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED'],
     },
   ],
 }))
+
 const runtimeBar = computed(() => ({
   labels: ['Request ms', 'Tokens', 'Active tools'],
   datasets: [
@@ -266,20 +267,21 @@ const runtimeBar = computed(() => ({
     },
   ],
 }))
+
 const conclusionText = computed(() => {
-  const agreement = metricPercent(evalResult.value?.pos_agreement)
-  const coverage = metricPercent(evalResult.value?.segmentation_coverage)
+  const agreement = evalResult.value ? toPercent(evalResult.value.pos_agreement) : 0
+  const coverage = evalResult.value ? toPercent(evalResult.value.segmentation_coverage) : 0
   return {
     agreement:
-      agreement >= 0.8
+      agreement >= 80
         ? 'The current run shows strong agreement across the active analyzers.'
-        : agreement >= 0.6
+        : agreement >= 60
           ? 'The current run is moderately consistent and merits token-level inspection.'
           : 'The current run shows low agreement and should be reviewed carefully.',
     coverage:
-      coverage >= 0.8
+      coverage >= 80
         ? 'Segmentation coverage is strong enough for comparative analysis.'
-        : coverage >= 0.5
+        : coverage >= 50
           ? 'Coverage is usable but uneven across the sentence.'
           : 'Coverage is limited and may affect downstream interpretation.',
     runtime:
@@ -295,18 +297,50 @@ async function runEvaluation() {
   if (!inputText.value.trim()) return
   loading.value = true
   error.value = ''
-  payload.value = null
+  evalResult.value = null
+  activeTools.value = []
+  excludedTools.value = []
+  posConflicts.value = []
+  rawNote.value = ''
   requestDuration.value = 0
 
   try {
     const started = performance.now()
-    const { data } = await axios.get(`${API_BASE_URL}/evaluate`, { params: { text: inputText.value } })
+    const { data } = await axios.get(`${API_BASE_URL}/evaluate`, {
+      params: { text: inputText.value },
+    })
     requestDuration.value = Math.round(performance.now() - started)
-    payload.value = data
+
+    // Backend returns { input, evaluation: { ... } }
+    // or flat { pos_agreement, lemma_match, ... }
+    const raw = data?.evaluation || data
+
+    evalResult.value = {
+      pos_agreement:        toScalar(raw.pos_agreement ?? raw.pos_agreement_pct),
+      lemma_normalized_match: toScalar(
+        raw.lemma_normalized_match ??
+        raw.lemma_normalized_match_pct ??
+        raw.lemma_match ??
+        raw.lemma_match_pct
+      ),
+      lemma_exact_match: toScalar(
+        raw.lemma_exact_match ??
+        raw.lemma_exact_match_pct ??
+        raw.lemma_match ??
+        raw.lemma_match_pct
+      ),
+      segmentation_coverage: toScalar(raw.segmentation_coverage),
+    }
+
+    activeTools.value  = raw.active_tools  || data.active_tools  || []
+    excludedTools.value = raw.excluded_tools || data.excluded_tools || []
+    posConflicts.value  = raw.pos_conflicts  || raw.all_conflicts  || []
+    rawNote.value       = raw.metrics_note   || ''
+
     recordAnalysis({
       page: 'Evaluate',
       text: inputText.value.trim(),
-      summary: `${percentLabel(normalizeEvaluation(data).pos_agreement, 0)} POS agreement | ${requestDuration.value} ms`,
+      summary: `${toPercent(evalResult.value.pos_agreement).toFixed(1)}% POS agreement | ${requestDuration.value} ms`,
     })
   } catch (e) {
     error.value = e?.response?.data?.detail || e?.message || 'Unable to connect to the evaluation service.'
@@ -320,48 +354,39 @@ function runExample(example) {
   runEvaluation()
 }
 
-function normalizeEvaluation(rawPayload) {
-  const raw = rawPayload.evaluation || rawPayload
-  const posAgreement = scoreValue(raw.pos_agreement ?? raw.pos_agreement_pct)
-  const lemmaNormalized = scoreValue(raw.lemma_normalized_match ?? raw.lemma_normalized_match_pct ?? raw.lemma_match_pct)
-
-  return {
-    ...raw,
-    pos_agreement: posAgreement,
-    lemma_normalized_match: lemmaNormalized,
-    lemma_exact_match: scoreValue(raw.lemma_exact_match ?? raw.lemma_exact_match_pct ?? raw.lemma_match_pct),
-    segmentation_coverage: scoreValue(raw.segmentation_coverage),
-    active_tools: raw.active_tools || rawPayload.active_tools || [],
-    excluded_tools: raw.excluded_tools || rawPayload.meta?.degraded_tools || [],
-    pos_conflicts: raw.pos_conflicts || [],
-  }
-}
-
-function scoreValue(value) {
+// Convert any backend value (0-1 float, "67.0%", or 0-100 int) → 0-1 scalar
+function toScalar(value) {
+  if (value == null) return 0
   if (typeof value === 'number') return value > 1 ? value / 100 : value
   if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value.replace('%', ''))
-    return Number.isFinite(parsed) ? parsed / 100 : 0
+    const n = parseFloat(value.replace('%', ''))
+    if (!isFinite(n)) return 0
+    return n > 1 ? n / 100 : n
   }
   return 0
 }
 
+// 0-1 scalar → 0-100 number (for charts)
+function toPercent(scalar) {
+  return Math.round(toScalar(scalar) * 100)
+}
+
 function percentLabel(score, digits = 1) {
-  return `${(scoreValue(score) * 100).toFixed(digits)}%`
+  return `${(toScalar(score) * 100).toFixed(digits)}%`
 }
 
 function getScoreClass(score) {
-  const normalized = scoreValue(score)
-  if (normalized >= 0.85) return 'score-high'
-  if (normalized >= 0.6) return 'score-medium'
+  const n = toScalar(score)
+  if (n >= 0.85) return 'score-high'
+  if (n >= 0.6)  return 'score-medium'
   return 'score-low'
 }
 
 function conflictText(conflict) {
-  const valueA = conflict.tool_a_value || conflict.value_a || conflict.toolAValue || ''
-  const valueB = conflict.tool_b_value || conflict.value_b || conflict.toolBValue || ''
-  const toolA = conflict.tool_a || conflict.toolA || 'tool A'
-  const toolB = conflict.tool_b || conflict.toolB || 'tool B'
+  const valueA = conflict.tool_a_value || conflict.value_a || conflict.camel_pos || ''
+  const valueB = conflict.tool_b_value || conflict.value_b || conflict.stanza_pos || ''
+  const toolA  = conflict.tool_a || 'CAMeL'
+  const toolB  = conflict.tool_b || 'Stanza'
   return `${toolA}: ${valueA || '-'} / ${toolB}: ${valueB || '-'}`
 }
 </script>
@@ -455,6 +480,43 @@ function conflictText(conflict) {
 .metrics-section {
   display: grid;
   gap: 18px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.kpi-card {
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-page-bg);
+  display: grid;
+  gap: 6px;
+}
+
+.kpi-label {
+  color: var(--c-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.kpi-value.score-high   { color: #059669; }
+.kpi-value.score-medium { color: #D97706; }
+.kpi-value.score-low    { color: #DC2626; }
+
+.kpi-note {
+  color: var(--c-text-muted);
+  font-size: 12px;
 }
 
 .analysis-visual-grid {
@@ -555,6 +617,20 @@ function conflictText(conflict) {
   line-height: 1.55;
 }
 
+.null-value {
+  color: var(--c-text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .analysis-visual-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .input-row,
   .report-grid,
@@ -562,13 +638,11 @@ function conflictText(conflict) {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
-
   .run-btn {
     width: 100%;
   }
-
-  .analysis-visual-grid {
-    grid-template-columns: 1fr;
+  .kpi-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>
