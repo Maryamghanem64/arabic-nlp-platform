@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from app.core.tool_registry import unavailable_result
@@ -14,6 +16,19 @@ stanza_pipeline = None
 stanza_import_error = None
 
 _NON_CONTENT_POS = {"CCONJ", "SCONJ", "PART", "PUNCT", "SYM"}
+
+
+def _stanza_resources_dir() -> Path | None:
+    candidates = [
+        Path(os.environ["STANZA_RESOURCES_DIR"]).expanduser() if os.environ.get("STANZA_RESOURCES_DIR") else None,
+        Path.home() / "stanza_resources",
+        Path.home() / "AppData" / "Local" / "StanfordNLP" / "stanza" / "resources",
+        Path.home() / "AppData" / "Local" / "StanfordNLP" / "stanza" / "Cache" / "1.12.0" / "resources",
+    ]
+    for candidate in candidates:
+        if candidate and (candidate / "ar").exists():
+            return candidate
+    return None
 
 
 def _norm_pos(value: Any) -> str:
@@ -75,7 +90,20 @@ def load_stanza() -> None:
         stanza_pipeline = None
         return
     try:
-        stanza_pipeline = stanza.Pipeline("ar", processors="tokenize,mwt,pos,lemma,depparse", verbose=False)
+        processors = os.environ.get("STANZA_PROCESSORS", "tokenize,mwt,pos,lemma")
+        pipeline_kwargs = {
+            "lang": "ar",
+            "processors": processors,
+            "verbose": False,
+            "use_gpu": False,
+        }
+        resources_dir = _stanza_resources_dir()
+        if resources_dir is not None:
+            pipeline_kwargs["dir"] = str(resources_dir)
+        download_method = getattr(stanza, "DownloadMethod", None)
+        if download_method is not None and hasattr(download_method, "REUSE_RESOURCES"):
+            pipeline_kwargs["download_method"] = download_method.REUSE_RESOURCES
+        stanza_pipeline = stanza.Pipeline(**pipeline_kwargs)
         logger.info("Stanza loaded")
     except Exception as exc:
         logger.warning("Stanza failed: %s", exc)

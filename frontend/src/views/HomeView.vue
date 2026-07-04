@@ -49,6 +49,12 @@
             <p>{{ statusError.message || 'Could not reach the tool registry endpoint.' }}</p>
           </div>
         </div>
+        <div v-else class="online-state dashboard-online">
+          <div>
+            <strong>Backend online</strong>
+            <p>{{ healthSummary }}</p>
+          </div>
+        </div>
 
         <div class="kpi-grid">
           <article v-for="metric in metrics" :key="metric.label" class="kpi-card dashboard-kpi">
@@ -306,7 +312,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { evaluateText, fusionText } from '@/api/nlpApi'
+import { getDemoToolHealth } from '@/api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS } from '@/config/tools'
 import { useToolStatus } from '@/composables/useToolStatus'
 import { TOOL_GROUPS } from '@/constants/designTokens'
@@ -314,9 +320,13 @@ import ScientificChart from '@/components/charts/ScientificChart.vue'
 import { readAnalysisHistory } from '@/utils/analysisHistory'
 
 const { toolStatuses, activeTools, loading: statusLoading, error: statusError, refresh } = useToolStatus()
+const DASHBOARD_EXCLUDED_TOOLS = new Set(['madamira'])
+const DASHBOARD_READY_STATUSES = new Set(['ok', 'partial', 'lazy', 'loading'])
+const DASHBOARD_CORE_TOOLS = ['camel', 'farasa', 'qalsadi', 'alkhalil', 'udpipe']
+const DASHBOARD_HEAVY_TOOLS = new Set(['stanza', 'arabert', 'sinatools'])
 
 const benchmarkLoading = ref(true)
-const benchmarkLabel = ref('Running a benchmark sentence to seed the dashboard...')
+const benchmarkLabel = ref('Loading a lightweight tool health snapshot...')
 const benchmark = ref({
   agreement: '0%',
   agreementWidth: '0%',
@@ -335,8 +345,6 @@ const benchmarkMetrics = ref({
   ok: false,
 })
 
-const benchmarkSentence = 'قرأت الطالبة الكتاب في المكتبة'
-
 const toolCards = computed(() =>
   TOOL_KEYS.map((key) => ({
     key,
@@ -349,7 +357,7 @@ const toolCards = computed(() =>
 )
 
 const activeToolCount = computed(() => activeTools.value.length)
-const totalTools = computed(() => TOOL_KEYS.length)
+const totalTools = computed(() => TOOL_KEYS.filter((tool) => !DASHBOARD_EXCLUDED_TOOLS.has(tool)).length)
 const supportedTasks = computed(() => {
   const tasks = new Set()
   TOOL_KEYS.forEach((key) => {
@@ -360,8 +368,9 @@ const supportedTasks = computed(() => {
 
 const groupHealth = computed(() =>
   Object.entries(TOOL_GROUPS).map(([key, tools]) => {
-    const active = tools.filter((tool) => ['ok', 'partial', 'lazy'].includes(toolStatuses.value[tool]?.status)).length
-    const total = tools.length
+    const includedTools = tools.filter((tool) => !DASHBOARD_EXCLUDED_TOOLS.has(tool))
+    const active = includedTools.filter((tool) => DASHBOARD_READY_STATUSES.has(toolStatuses.value[tool]?.status)).length
+    const total = includedTools.length
     const ratio = total ? Math.round((active / total) * 100) : 0
     const label = key === 'morphology' ? 'Morphology' : key === 'syntax' ? 'Syntax' : 'Segmentation'
     const gradient =
@@ -404,25 +413,25 @@ const metrics = computed(() => [
   {
     label: 'Average agreement',
     value: benchmark.value.agreement,
-    note: 'Derived from the built-in benchmark sentence.',
+    note: 'Core-tool readiness from the lightweight health check.',
     className: scoreClass(benchmarkMetrics.value.agreement),
   },
   {
     label: 'Average confidence',
     value: benchmark.value.confidence,
-    note: 'Fusion confidence from the same benchmark sentence.',
+    note: 'Registered-tool readiness from the same health snapshot.',
     className: scoreClass(benchmarkMetrics.value.confidence),
   },
   {
     label: 'Response time',
     value: benchmark.value.responseTime,
-    note: 'Average of fusion and evaluation calls.',
+    note: 'Round trip for the dashboard health endpoint.',
     className: 'score-medium',
   },
   {
     label: 'System health',
     value: benchmark.value.status,
-    note: 'Combines backend availability and benchmark execution.',
+    note: 'Combines backend availability and tool readiness.',
     className: benchmark.value.statusClass,
   },
 ])
@@ -430,8 +439,8 @@ const metrics = computed(() => [
 const capabilities = computed(() => [
   { label: 'Running services', value: `${activeToolCount.value}/${totalTools.value}`, note: 'The dashboard reflects live startup detection.' },
   { label: 'Supported tasks', value: `${supportedTasks.value}`, note: 'Morphology, segmentation, syntax, and lexical evidence.' },
-  { label: 'Benchmark status', value: benchmark.value.status, note: 'The dashboard executes one reference sentence automatically.' },
-  { label: 'Evaluation summary', value: benchmark.value.agreement, note: 'Agreement and confidence are pulled from backend endpoints.' },
+  { label: 'Benchmark status', value: benchmark.value.status, note: 'The dashboard uses a lightweight health snapshot automatically.' },
+  { label: 'Evaluation summary', value: benchmark.value.agreement, note: 'Readiness ratios are pulled from backend health endpoints.' },
   { label: 'Average latency', value: benchmark.value.responseTime, note: 'Useful for presenting deployment readiness to reviewers.' },
   { label: 'Corpus sets', value: String(corpora.value.length), note: 'Workspace datasets and exported experiment files.' },
 ])
@@ -446,7 +455,7 @@ const recentAnalyses = ref(readAnalysisHistory())
 
 async function refreshDashboard() {
   benchmarkLoading.value = true
-  benchmarkLabel.value = 'Refreshing benchmark metrics...'
+  benchmarkLabel.value = 'Refreshing lightweight health metrics...'
 
   try {
     await refresh()
@@ -454,34 +463,35 @@ async function refreshDashboard() {
   } finally {
     benchmarkLoading.value = false
     benchmarkLabel.value = benchmarkMetrics.value.ok
-      ? 'Live benchmark data captured from the backend.'
-      : 'Benchmark data is unavailable, but the dashboard remains usable.'
+      ? 'Live health data captured from the backend.'
+      : 'Tool health is degraded, but the backend remains usable.'
   }
 }
 
 async function runBenchmark() {
   const started = performance.now()
   try {
-    const [evaluationResult, fusionResult] = await Promise.all([evaluateText(benchmarkSentence), fusionText(benchmarkSentence)])
+    const healthResult = await getDemoToolHealth(false)
     const finished = performance.now()
-    const evaluation = evaluationResult?.evaluation || evaluationResult || {}
-    const fusionRows = Array.isArray(fusionResult?.fusion) ? fusionResult.fusion : Array.isArray(fusionResult) ? fusionResult : []
-    const confidenceScores = fusionRows
-      .map((row) => Number(row?.final?.confidence_score ?? row?.confidence_score ?? row?.confidence?.score))
-      .filter((value) => Number.isFinite(value))
+    const rawTools = healthResult?.tools || healthResult?.data?.tools || {}
+    const toolEntries = TOOL_KEYS.map((key) => [key, normalizeDashboardStatus(key, rawTools[key] || toolStatuses.value[key])])
+    const registeredTools = toolEntries.filter(([key, status]) => !DASHBOARD_EXCLUDED_TOOLS.has(key) && status !== 'unknown')
+    const readyTools = registeredTools.filter(([, status]) => DASHBOARD_READY_STATUSES.has(status))
+    const coreStatuses = DASHBOARD_CORE_TOOLS.map((key) => normalizeDashboardStatus(key, rawTools[key] || toolStatuses.value[key]))
+    const coreReady = coreStatuses.filter((status) => DASHBOARD_READY_STATUSES.has(status)).length
+    const heavyLazy = toolEntries.filter(([key, status]) => DASHBOARD_HEAVY_TOOLS.has(key) && ['lazy', 'loading'].includes(status)).length
+    const excluded = toolEntries.filter(([, status]) => status === 'excluded').length
+    const degraded = registeredTools.filter(([, status]) => !DASHBOARD_READY_STATUSES.has(status)).length
 
-    const agreementScore = average([
-      parsePercent(evaluation.pos_agreement_pct),
-      parsePercent(evaluation.lemma_match_pct),
-      parsePercent(evaluation.segmentation_coverage),
-    ])
-    const confidenceScore = confidenceScores.length ? average(confidenceScores) : 0
+    const agreementScore = coreStatuses.length ? coreReady / coreStatuses.length : 0
+    const confidenceScore = registeredTools.length ? readyTools.length / registeredTools.length : 0
+    const healthDegraded = excluded > 0 || degraded > 0
 
     benchmarkMetrics.value = {
       agreement: agreementScore,
       confidence: confidenceScore,
       responseTimeMs: Math.round(finished - started),
-      ok: true,
+      ok: !healthDegraded,
     }
 
     benchmark.value = {
@@ -491,9 +501,9 @@ async function runBenchmark() {
       confidenceWidth: `${Math.round(confidenceScore * 100)}%`,
       responseTime: `${Math.round(finished - started)} ms`,
       responseWidth: `${Math.max(18, 100 - Math.min(95, Math.round((finished - started) / 12)))}%`,
-      status: 'Ready',
-      statusClass: 'pill-green',
-      note: `Evaluation and fusion completed in ${Math.round(finished - started)} ms for the reference sentence.`,
+      status: healthDegraded ? 'Degraded' : 'Ready',
+      statusClass: healthDegraded ? 'pill-amber' : 'pill-green',
+      note: `Backend online. ${readyTools.length}/${registeredTools.length} registered tools are available; ${heavyLazy} heavy tools are on demand.`,
     }
   } catch (error) {
     const finished = performance.now()
@@ -527,6 +537,8 @@ function readableStatus(status) {
   if (status === 'ok') return 'Online'
   if (status === 'partial') return 'Partial'
   if (status === 'lazy') return 'On demand'
+  if (status === 'loading') return 'Loading'
+  if (status === 'excluded') return 'Excluded'
   if (status === 'future_work') return 'Planned'
   if (status === 'missing_dependency') return 'Missing dependency'
   if (status === 'missing_model') return 'Missing model'
@@ -537,7 +549,8 @@ function readableStatus(status) {
 
 function statusPill(status) {
   if (status === 'ok') return 'pill-green'
-  if (status === 'partial' || status === 'lazy') return 'pill-amber'
+  if (status === 'partial' || status === 'lazy' || status === 'loading') return 'pill-amber'
+  if (status === 'excluded') return 'pill-gray'
   if (status === 'future_work' || String(status).startsWith('missing') || status === 'unavailable') return 'pill-gray'
   return 'pill-red'
 }
@@ -557,19 +570,13 @@ function describeTool(key) {
   return descriptions[key] || 'Integrated NLP service.'
 }
 
-function parsePercent(value) {
-  if (typeof value === 'number') return value > 1 ? value / 100 : value
-  if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value.replace('%', ''))
-    return Number.isFinite(parsed) ? parsed / 100 : 0
-  }
-  return 0
-}
-
-function average(values) {
-  const items = values.filter((value) => Number.isFinite(value))
-  if (!items.length) return 0
-  return items.reduce((sum, value) => sum + value, 0) / items.length
+function normalizeDashboardStatus(tool, entry) {
+  if (!entry) return 'unknown'
+  if (typeof entry === 'string') return entry.toLowerCase()
+  const rawStatus = String(entry.status || 'unknown').toLowerCase()
+  if (tool === 'madamira' && rawStatus !== 'ok') return 'excluded'
+  if (DASHBOARD_HEAVY_TOOLS.has(tool) && rawStatus === 'ok' && entry.loaded === false) return 'lazy'
+  return rawStatus
 }
 
 async function refreshStatusOnly() {
@@ -586,8 +593,8 @@ async function initializeDashboard() {
   await runBenchmark()
   benchmarkLoading.value = false
   benchmarkLabel.value = benchmarkMetrics.value.ok
-    ? 'Live benchmark data captured from the backend.'
-    : 'Benchmark data is unavailable, but the dashboard remains usable.'
+    ? 'Live health data captured from the backend.'
+    : 'Tool health is degraded, but the dashboard remains usable.'
 }
 
 function refreshRecentAnalyses() {
@@ -601,6 +608,15 @@ const dashboardMetrics = computed(() => ({
   tasks: supportedTasks.value,
   healthLabel: benchmarkMetrics.value.ok ? 'Healthy' : 'Degraded',
 }))
+
+const healthSummary = computed(() => {
+  const lazyCount = TOOL_KEYS.filter((tool) => ['lazy', 'loading'].includes(toolStatuses.value[tool]?.status)).length
+  const excludedCount = TOOL_KEYS.filter((tool) => toolStatuses.value[tool]?.status === 'excluded').length
+  if (lazyCount || excludedCount) {
+    return `Tool health degraded: ${lazyCount} heavy tools are lazy/loading and ${excludedCount} tool is excluded.`
+  }
+  return 'Tool registry responded quickly and core services are visible.'
+})
 
 const toolAvailabilityChart = computed(() => {
   const online = activeToolCount.value
@@ -895,6 +911,25 @@ onUnmounted(() => {
 
 .dashboard-error {
   margin-bottom: 14px;
+}
+
+.dashboard-online {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 12px;
+  background: rgba(240, 253, 250, 0.78);
+  color: var(--c-text-primary);
+}
+
+.dashboard-online strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.dashboard-online p {
+  margin: 0;
+  color: var(--c-text-secondary);
 }
 
 .recent-list {

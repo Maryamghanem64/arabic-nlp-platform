@@ -1,6 +1,7 @@
 <template>
   <div class="page-wrap analyze-page page-stack">
     <section class="hero-band analyze-hero">
+
       <div class="hero-content">
         <span class="eyebrow">Single tool deep analysis</span>
         <h1 class="hero-title">Select any tool, or run the combined backend path.</h1>
@@ -44,6 +45,7 @@
 
     <section class="panel panel-pad selector-panel">
       <div class="section-head">
+
         <div>
           <h2 class="section-title">Tool Selector</h2>
           <p class="section-subtitle">The list is driven by the shared tool config and live backend status.</p>
@@ -203,10 +205,10 @@
                     <p>{{ tool.type }}</p>
                   </div>
                 </div>
-                <span :class="['pill', statusPill(toolStatus(tool.key))]">{{ statusLabel(toolStatus(tool.key)) }}</span>
+                <span :class="['pill', statusPill(resultStatus(tool.key))]">{{ statusLabel(resultStatus(tool.key)) }}</span>
               </div>
 
-              <div v-if="isRenderableToolStatus(toolStatus(tool.key)) && toolRows(tool.key).length" class="table-scroll tool-table">
+              <div v-if="isRenderableToolStatus(resultStatus(tool.key)) && toolRows(tool.key).length" class="table-scroll tool-table">
                 <table>
                   <thead>
                     <tr>
@@ -230,10 +232,10 @@
                   </tbody>
                 </table>
               </div>
-              <div v-else-if="isRenderableToolStatus(toolStatus(tool.key))" class="empty-state">No token output is available for this tool.</div>
+              <div v-else-if="isRenderableToolStatus(resultStatus(tool.key))" class="empty-state">No token output is available for this tool.</div>
               <div v-else class="status-card">
-                <strong>{{ statusLabel(toolStatus(tool.key)) }}</strong>
-                <p>{{ toolReason(tool.key) || 'The backend returned a safe unavailable response.' }}</p>
+                <strong>{{ statusLabel(resultStatus(tool.key)) }}</strong>
+                <p>{{ resultReason(tool.key) || 'The backend returned a safe unavailable response.' }}</p>
               </div>
             </article>
           </div>
@@ -247,10 +249,10 @@
                   <p>{{ selectedToolMeta.type }}</p>
                 </div>
               </div>
-              <span :class="['pill', statusPill(toolStatus(selectedTool))]">{{ statusLabel(toolStatus(selectedTool)) }}</span>
+              <span :class="['pill', statusPill(resultStatus(selectedTool))]">{{ statusLabel(resultStatus(selectedTool)) }}</span>
             </div>
 
-            <div v-if="isRenderableToolStatus(toolStatus(selectedTool)) && toolRows(selectedTool).length" class="table-scroll tool-table">
+            <div v-if="isRenderableToolStatus(resultStatus(selectedTool)) && toolRows(selectedTool).length" class="table-scroll tool-table">
               <table>
                 <thead>
                   <tr>
@@ -275,8 +277,8 @@
               </table>
             </div>
             <div v-else class="status-card">
-              <strong>{{ statusLabel(toolStatus(selectedTool)) }}</strong>
-              <p>{{ toolReason(selectedTool) || 'The backend returned a safe unavailable response.' }}</p>
+              <strong>{{ statusLabel(resultStatus(selectedTool)) }}</strong>
+              <p>{{ resultReason(selectedTool) || 'The backend returned a safe unavailable response.' }}</p>
             </div>
           </article>
         </div>
@@ -388,9 +390,11 @@ import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
 import { canonicalToken } from '../utils/tokenModel'
 import { recordAnalysis } from '../utils/analysisHistory'
+import { preloadSinaTools, getToolsStatus as fetchToolsStatus } from '../api/nlpApi'
 
 const route = useRoute()
 const inputText = ref('')
+
 const loading = ref(false)
 const error = ref('')
 const rawResults = ref(null)
@@ -401,6 +405,12 @@ const copied = ref(false)
 const pendingTool = ref('')
 const selectionNotice = ref(null)
 const lastRunSummary = ref('')
+
+// SinaTools preload UX
+const sinatoolsCardState = ref('') // '', 'lazy_not_loaded', 'loading', 'loaded', 'error'
+const sinatoolsLoading = ref(false)
+const sinatoolsProgressLabel = ref('')
+
 
 const {
   toolStatuses,
@@ -674,10 +684,23 @@ function normalizeFinal(row) {
 }
 
 function toolPayloadForKey(toolKey) {
+  const payload = analysisPayload()
   if (selectedTool.value === 'all') {
-    return rawResults.value?.tools?.[toolKey] ?? rawResults.value?.[toolKey] ?? null
+    return payload?.tools?.[toolKey] ?? payload?.[toolKey] ?? null
   }
-  return rawResults.value
+  return payload
+}
+
+function resultStatus(toolKey) {
+  return toolPayloadForKey(toolKey)?.status || toolStatus(toolKey)
+}
+
+function resultReason(toolKey) {
+  return toolPayloadForKey(toolKey)?.reason || toolReason(toolKey)
+}
+
+function analysisPayload() {
+  return rawResults.value?.data || rawResults.value
 }
 
 function fusionSourceChips(sources) {
@@ -794,6 +817,7 @@ function statusLabel(status) {
   if (status === 'error') return 'error'
   if (status === 'unavailable') return 'unavailable'
   if (status === 'lazy') return 'loads on demand'
+  if (status === 'lazy_not_loaded') return 'Loading model...'
   if (status === 'future_work') return 'planned'
   return 'status unknown'
 }

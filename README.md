@@ -26,6 +26,20 @@ Arabic NLP Platform is a FastAPI + Vue 3 application for comparing the outputs o
 - Node.js 20+ recommended
 - Java if you plan to use Java-backed tools such as AlKhalil or MADAMIRA
 
+## Analyzer Status
+
+| Tool | Status | Notes |
+| --- | --- | --- |
+| CAMeL | ✅ Working | Loads and returns token-level morphology in the backend. |
+| Farasa | ✅ Working | Uses the local Farasa JAR directly with a backend timeout; isolated and combined smoke tests returned successfully. |
+| Stanza | ⚠️ Partial | Arabic model is detected, but cold analysis hung under current low-memory conditions; `/analyze-combined` skips it below the `STANZA_LOW_MEMORY_THRESHOLD_MB` safety floor. |
+| Qalsadi | ✅ Working | Existing analyzer remains registered and available. |
+| AlKhalil | ⚠️ Partial | Java bridge/resources detected; remains optional and should be verified before demo use. |
+| UDPipe | ✅ Working | Local `arabic.udpipe` model loads successfully. |
+| MADAMIRA | ⚠️ Partial | Working through the bundled Java persistent server with `-msaonly`; MSA-only mode limits dialect/resource coverage. |
+| SinaTools | ❌ Blocked | Morphology files are present, but the official morphology API still times out after 60s; NER bundle `Wj27012000.tar` is also missing. |
+| AraBERT | ✅ Working | Cached `aubmindlab/bert-base-arabertv2` fill-mask model works as contextual support; lemma/POS/root intentionally remain null. |
+
 ## Quick Start
 
 1. Create and activate a Python virtual environment.

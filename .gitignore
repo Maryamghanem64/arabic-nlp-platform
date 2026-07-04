@@ -8,3 +8,5 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 .DS_Store
+# SinaTools large data file
+app/tools/sinatools/lemmas_dic.pickle

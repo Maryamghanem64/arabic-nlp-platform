@@ -130,8 +130,14 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
     statuses["farasa"] = farasa_status
 
     if has_module("stanza"):
+        try:
+            from app.tools import stanza_tool as _stanza_tool
+
+            stanza_loaded = _stanza_tool.stanza_pipeline is not None
+        except Exception:
+            stanza_loaded = False
         statuses["stanza"] = (
-            {"status": "ok", "reason": "stanza package and Arabic model detected."}
+            {"status": "ok", "reason": "stanza package and Arabic model detected.", "loaded": stanza_loaded}
             if stanza_model_present()
             else {"status": "missing_model", "reason": "Run python install_models.py to download stanza Arabic models."}
         )
@@ -181,20 +187,53 @@ def detect_tool_status() -> Dict[str, Dict[str, Any]]:
 
     statuses["udpipe"] = get_udpipe_status()
 
-    if java["status"] != "ok":
-        statuses["madamira"] = {"status": "disabled", "reason": "MADAMIRA requires Java.", "java": java}
-    else:
-        madamira_path = model_path_status("MADAMIRA_HOME", "tools/madamira", "missing_model")
-        statuses["madamira"] = (
-            madamira_path
-            if madamira_path.get("status") == "ok"
-            else {"status": "disabled", "reason": madamira_path.get("reason", "MADAMIRA not configured."), "path": madamira_path.get("path")}
-        )
+    try:
+        from app.tools import madamira_tool as _madamira_tool
 
-    statuses["sinatools"] = {
-        "status": "future_work",
-        "reason": "SinaTools is tracked as a future microservice because of large model size.",
-    }
+        madamira_status = _madamira_tool.get_madamira_status_detail()
+        statuses["madamira"] = {
+            "status": madamira_status.get("status", "unknown"),
+            "reason": madamira_status.get("reason", ""),
+            "loaded": madamira_status.get("loaded", False),
+            "msa_only": madamira_status.get("server", {}).get("msa_only"),
+            "bundle_root": madamira_status.get("bundle_root"),
+            "jar_root": madamira_status.get("jar_root"),
+            "resource_root": madamira_status.get("resource_root"),
+            "missing": madamira_status.get("missing", []),
+            "resources_found": madamira_status.get("resources_found", False),
+            "required_resources": madamira_status.get("required_resources", {}),
+            "optional_found": madamira_status.get("optional_found", {}),
+            "layout": madamira_status.get("layout", {}),
+        }
+    except Exception:
+        statuses["madamira"] = {
+            "status": "missing_dependency" if java["status"] == "ok" else "disabled",
+            "reason": "MADAMIRA requires the bundled Java resources and a Java runtime.",
+            "java": java,
+        }
+
+    try:
+        from app.tools import sinatools_tool as _sinatools_tool
+
+        sinatools_status = _sinatools_tool.get_sinatools_status_detail()
+        statuses["sinatools"] = {
+            "status": sinatools_status.get("status", "unknown"),
+            "reason": sinatools_status.get("reason", ""),
+            "loaded": sinatools_status.get("loaded", False),
+            "missing": sinatools_status.get("missing", []),
+            "resource_path": sinatools_status.get("resource_path"),
+            "required_path": sinatools_status.get("required_path"),
+            "package_expected_path": sinatools_status.get("package_expected_path"),
+            "resources_found": sinatools_status.get("resources_found", False),
+            "required_resources": sinatools_status.get("required_resources", {}),
+            "optional_resources": sinatools_status.get("optional_resources", {}),
+            "additional_missing_optional": sinatools_status.get("additional_missing_optional", []),
+        }
+    except Exception:
+        statuses["sinatools"] = {
+            "status": "missing_dependency",
+            "reason": "SinaTools package or resources are not available.",
+        }
 
     return statuses
 
@@ -216,14 +255,14 @@ def safe_analyze(tool: str, analyzer: Callable[[str], Dict[str, Any]], text: str
         result.setdefault("pos", [])
         result.setdefault("reason", "")
 
-        return {
-            "tool": result.get("tool", tool),
-            "status": result.get("status", "ok"),
-            "tokens": result.get("tokens", []) or [],
-            "lemmas": result.get("lemmas", []) or [],
-            "pos": result.get("pos", []) or [],
-            "reason": result.get("reason", "") or "",
-        }
+        normalized = dict(result)
+        normalized["tool"] = result.get("tool", tool)
+        normalized["status"] = result.get("status", "ok")
+        normalized["tokens"] = result.get("tokens", []) or []
+        normalized["lemmas"] = result.get("lemmas", []) or []
+        normalized["pos"] = result.get("pos", []) or []
+        normalized["reason"] = result.get("reason", "") or ""
+        return normalized
     except Exception as exc:
         logger.exception("[%s] safe analyzer failure", tool)
         return unified_result(tool=tool, status="error", tokens=[], lemmas=[], pos=[], reason=str(exc))
@@ -245,4 +284,3 @@ def log_startup_report() -> Dict[str, Dict[str, Any]]:
     for line in startup_report_lines(statuses):
         logger.info(line)
     return statuses
-

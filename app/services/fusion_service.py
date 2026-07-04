@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional
 
 from app.utils.constants import FUSION_WEIGHTS, KNOWN_FIXES
 from app.utils.helpers import (
@@ -16,7 +17,9 @@ _TOOL_RELIABILITY = {
     "udpipe": 0.15,
     "qalsadi": 0.10,
     "alkhalil": 0.05,
+    "sinatools": 0.20,
 }
+
 TOOL_WEIGHTS = {
     "camel": 0.35,
     "stanza": 0.35,
@@ -24,7 +27,10 @@ TOOL_WEIGHTS = {
     "qalsadi": 0.10,
     "alkhalil": 0.05,
     "farasa": 0.05,
+    "sinatools": 0.20,
 }
+
+_INVALID_VALUES = {None, "", "#", "X", "x", "UNK", "unknown", "None", "null"}
 
 
 def _alignment_match_type(tok: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -52,17 +58,87 @@ def _camel_root_type(camel_tok: Optional[Dict[str, Any]]) -> Optional[str]:
     return camel_tok.get("root_type")
 
 
+def _strip_arabic_diacritics(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"[\u064b-\u065f\u0670]", "", text)
+    text = text.replace("\u0640", "")
+    return text.strip()
+
+
+def _normalize_root_for_fusion(value: Any) -> str:
+    text = _strip_arabic_diacritics(value)
+    text = re.sub(r"[.\s\-ـ]+", "", text)
+    return text
+
+
+def _normalize_lemma_for_fusion(value: Any) -> str:
+    text = _strip_arabic_diacritics(value)
+    text = re.sub(r"\d+$", "", text)
+    text = text.replace("ٱ", "ا").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    return text.strip()
+
+
+def _normalize_pos_for_fusion(value: Any) -> Optional[str]:
+    if value in _INVALID_VALUES:
+        return None
+
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    mapped = normalize_pos_for_compare(raw)
+    if mapped and mapped not in _INVALID_VALUES:
+        return mapped
+
+    if "حرف جر" in raw:
+        return "ADP"
+    if "فعل" in raw:
+        return "VERB"
+    if "صفة" in raw:
+        return "ADJ"
+    if "ضمير" in raw:
+        return "PRON"
+    if "اسم" in raw or "مفرد" in raw or "مثنى" in raw or "جمع" in raw:
+        return "NOUN"
+    if "حرف" in raw:
+        return "PART"
+
+    upper = raw.upper()
+    if upper in {"NOUN", "VERB", "ADJ", "ADV", "ADP", "PRON", "PART", "DET", "CCONJ", "SCONJ", "PROPN", "NUM"}:
+        return upper
+
+    return None
+
+
+
+
+def _is_valid_value(value: Any) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, list):
+        return len(value) > 0
+
+    if isinstance(value, dict):
+        return len(value) > 0
+
+    text = str(value).strip()
+
+    if text in {"", "#", "X", "x", "UNK", "unknown", "None", "null"}:
+        return False
+
+    return True
+
+    return True
 def score_pos(camel_pos_raw, stanza_pos_raw, *, partial_match: bool = False) -> tuple:
-    """Returns (final_pos, source, score, notes)."""
-    camel_pos = normalize_pos_for_compare(camel_pos_raw)
-    stanza_pos = normalize_pos_for_compare(stanza_pos_raw)
+    camel_pos = _normalize_pos_for_fusion(camel_pos_raw)
+    stanza_pos = _normalize_pos_for_fusion(stanza_pos_raw)
     notes: List[str] = []
 
     if camel_pos == stanza_pos and camel_pos:
         return camel_pos, "partial_match" if partial_match else "agreement", 4, notes
 
     if camel_pos and stanza_pos:
-
         notes.append(f"POS conflict: camel={camel_pos} stanza={stanza_pos}")
 
         camel_score = FUSION_WEIGHTS["pos"].get("camel", 0)
@@ -85,18 +161,20 @@ def score_pos(camel_pos_raw, stanza_pos_raw, *, partial_match: bool = False) -> 
     return None, "none", 0, notes
 
 
-
 def _token_value(tok: Optional[Dict[str, Any]], key: str) -> Optional[str]:
     if not tok:
         return None
+
     value = tok.get(key)
-    if value is not None and str(value).strip():
+    if _is_valid_value(value):
         return str(value).strip()
+
     analyses = tok.get("analyses") or []
     if analyses and isinstance(analyses[0], dict):
         nested = analyses[0].get(key)
-        if nested is not None and str(nested).strip():
+        if _is_valid_value(nested):
             return str(nested).strip()
+
     return None
 
 
@@ -117,21 +195,31 @@ def _decision_trace(
     conflicts: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     trace: List[Dict[str, Any]] = []
+
     for feature in ("lemma", "root", "pos", "segmentation", "dependency"):
         value = final.get(feature)
         source = sources.get(feature)
-        supporting = []
+        supporting: List[str] = []
+
         for tool, payload in evidence.items():
             if not isinstance(payload, dict):
                 continue
+
             tool_value = payload.get(feature)
+
+            if not _is_valid_value(tool_value):
+                continue
+
             if feature == "pos":
-                same = normalize_pos_for_compare(tool_value) == normalize_pos_for_compare(value)
+                same = _normalize_pos_for_fusion(tool_value) == _normalize_pos_for_fusion(value)
             elif feature == "lemma":
-                same = normalize_lemma_for_compare(tool_value) == normalize_lemma_for_compare(value)
+                same = _normalize_lemma_for_fusion(tool_value) == _normalize_lemma_for_fusion(value)
+            elif feature == "root":
+                same = _normalize_root_for_fusion(tool_value) == _normalize_root_for_fusion(value)
             else:
                 same = tool_value == value
-            if same and tool_value not in (None, "", []):
+
+            if same:
                 supporting.append(tool)
 
         trace.append(
@@ -143,15 +231,32 @@ def _decision_trace(
                 "conflict_count": len([c for c in conflicts if c.get("feature") == feature]),
             }
         )
+
     return trace
 
 
 def score_to_level(score: float) -> str:
-    if score >= 0.85:
+    if score >= 0.75:
         return "high"
-    if score >= 0.60:
+    if score >= 0.55:
         return "medium"
     return "low"
+
+
+def _values_equal_for_feature(feature: str, a: Any, b: Any) -> bool:
+    if not _is_valid_value(a) or not _is_valid_value(b):
+        return False
+
+    if feature == "pos":
+        return _normalize_pos_for_fusion(a) == _normalize_pos_for_fusion(b)
+
+    if feature == "lemma":
+        return _normalize_lemma_for_fusion(a) == _normalize_lemma_for_fusion(b)
+
+    if feature == "root":
+        return _normalize_root_for_fusion(a) == _normalize_root_for_fusion(b)
+
+    return str(a).strip() == str(b).strip()
 
 
 def compute_evidence_confidence(
@@ -161,33 +266,50 @@ def compute_evidence_confidence(
     all_tool_values: dict,
     conflicts: list,
 ) -> float:
-    """
-    Evidence-based confidence: weighted agreement - conflict penalty.
-    Excludes None/empty/"X" values from both numerator and denominator.
-    """
-    _ = feature, selected_tool
+    _ = selected_tool
+
+    if not _is_valid_value(selected_value):
+        return 0.0
+
     valid = {
-        t: v for t, v in all_tool_values.items()
-        if v not in (None, "", "X", "x")
+        t: v
+        for t, v in all_tool_values.items()
+        if _is_valid_value(v)
     }
-    if not valid or selected_value in (None, "", "X", "x"):
-        return 0.25 if not valid else 0.0
+
+    if not valid:
+        return 0.25
 
     total_weight = sum(TOOL_WEIGHTS.get(t, 0.05) for t in valid)
     support_weight = sum(
         TOOL_WEIGHTS.get(t, 0.05)
         for t, v in valid.items()
-        if v == selected_value
+        if _values_equal_for_feature(feature, v, selected_value)
     )
 
     agreement_ratio = support_weight / total_weight if total_weight else 0.0
-    conflict_penalty = min(0.35, 0.08 * len(conflicts))
 
-    raw_score = 0.20 + 0.65 * agreement_ratio - conflict_penalty
-    return round(max(0.0, min(1.0, raw_score)), 3)
+    real_conflicts = [
+        c for c in conflicts
+        if c.get("severity") in {"high", "medium"} or c.get("level") in {"high", "medium"}
+    ]
+    conflict_penalty = min(0.30, 0.06 * len(real_conflicts))
+
+    raw_score = 0.35 + 0.50 * agreement_ratio - conflict_penalty
+
+    return round(max(0.10, min(0.95, raw_score)), 3)
 
 
-def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_tok=None, qalsadi_tok=None, alkhalil_tok=None, udpipe_tok=None) -> tuple[float, str]:
+def compute_token_confidence(
+    fused: Dict[str, Any],
+    *,
+    camel_tok=None,
+    stanza_tok=None,
+    qalsadi_tok=None,
+    alkhalil_tok=None,
+    udpipe_tok=None,
+    sinatools_tok=None,
+) -> tuple[float, str]:
     feature_payloads = [
         (
             "pos",
@@ -199,6 +321,7 @@ def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_to
                 "qalsadi": _token_value(qalsadi_tok, "pos") or _token_value(qalsadi_tok, "upos"),
                 "alkhalil": _token_value(alkhalil_tok, "pos") or _token_value(alkhalil_tok, "upos"),
                 "udpipe": _token_value(udpipe_tok, "pos") or _token_value(udpipe_tok, "upos"),
+                "sinatools": _token_value(sinatools_tok, "pos") or _token_value(sinatools_tok, "upos"),
             },
         ),
         (
@@ -211,6 +334,19 @@ def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_to
                 "qalsadi": _token_value(qalsadi_tok, "lemma"),
                 "alkhalil": _token_value(alkhalil_tok, "lemma"),
                 "udpipe": _token_value(udpipe_tok, "lemma"),
+                "sinatools": _token_value(sinatools_tok, "lemma"),
+            },
+        ),
+        (
+            "root",
+            fused.get("final", {}).get("root"),
+            fused.get("sources", {}).get("root", ""),
+            {
+                "camel": _token_value(camel_tok, "root"),
+                "qalsadi": _token_value(qalsadi_tok, "root"),
+                "alkhalil": _token_value(alkhalil_tok, "root"),
+                "udpipe": _token_value(udpipe_tok, "root"),
+                "sinatools": _token_value(sinatools_tok, "root"),
             },
         ),
         (
@@ -252,6 +388,7 @@ def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_to
     ]
 
     scores: List[float] = []
+
     for feature, selected_value, selected_tool, values_by_tool in feature_payloads:
         conflicts = [c for c in fused.get("conflicts", []) if c.get("feature") == feature]
         score = compute_evidence_confidence(
@@ -271,7 +408,65 @@ def compute_token_confidence(fused: Dict[str, Any], *, camel_tok=None, stanza_to
     return final, score_to_level(final)
 
 
-def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_tok=None, alkhalil_tok=None, udpipe_tok=None):
+def _clean_conflicts(conflicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cleaned: List[Dict[str, Any]] = []
+
+    for conflict in conflicts:
+        feature = conflict.get("feature")
+        values = conflict.get("values")
+
+        if isinstance(values, dict):
+            valid_values = {
+                tool: value
+                for tool, value in values.items()
+                if _is_valid_value(value)
+            }
+
+            if len(valid_values) <= 1:
+                continue
+
+            if feature == "pos":
+                normalized = {
+                    tool: _normalize_pos_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_pos_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+            if feature == "lemma":
+                normalized = {
+                    tool: _normalize_lemma_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_lemma_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+            if feature == "root":
+                normalized = {
+                    tool: _normalize_root_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_root_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+        cleaned.append(conflict)
+
+    return cleaned
+
+
+def fuse_token(
+    word,
+    camel_tok=None,
+    stanza_tok=None,
+    farasa_tok=None,
+    qalsadi_tok=None,
+    alkhalil_tok=None,
+    udpipe_tok=None,
+    sinatools_tok=None,
+):
     fused: Dict[str, Any] = {
         "word": word,
         "final": {},
@@ -291,6 +486,7 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
         ("qalsadi", qalsadi_tok),
         ("alkhalil", alkhalil_tok),
         ("udpipe", udpipe_tok),
+        ("sinatools", sinatools_tok),
     ):
         if tok:
             fused["evidence"][name] = {
@@ -302,27 +498,33 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
                 "dependency": tok.get("dependency"),
             }
 
-    if farasa_tok and farasa_tok.get("segmentation"):
+    if farasa_tok and farasa_tok.get("segmentation") and farasa_tok.get("status", "ok") == "ok":
         fused["final"]["segmentation"] = farasa_tok["segmentation"]
         fused["sources"]["segmentation"] = "farasa"
     else:
         fused["final"]["segmentation"] = [word]
-        fused["sources"]["segmentation"] = "fallback"
+        fused["sources"]["segmentation"] = "surface_fallback"
+        fused["notes"].append("Farasa unavailable; used surface fallback segmentation.")
 
     camel_analyses = camel_tok.get("analyses", []) if camel_tok else []
     qalsadi_analyses = qalsadi_tok.get("analyses", []) if qalsadi_tok else []
     alkhalil_analyses = alkhalil_tok.get("analyses", []) if alkhalil_tok else []
     udpipe_analyses = udpipe_tok.get("analyses", []) if udpipe_tok else []
+    sinatools_analyses = sinatools_tok.get("analyses", []) if sinatools_tok else []
 
-    camel_lemma = camel_analyses[0].get("lemma") if camel_analyses else None
+    camel_lemma = camel_analyses[0].get("lemma") if camel_analyses else (_token_value(camel_tok, "lemma") if camel_tok else None)
     stanza_lemma = stanza_tok.get("lemma") if stanza_tok else None
     qalsadi_lemma = qalsadi_analyses[0].get("lemma") if qalsadi_analyses else (qalsadi_tok.get("lemma") if qalsadi_tok else None)
-    alkhalil_lemma = alkhalil_analyses[0].get("lemma") if alkhalil_analyses else None
-    udpipe_lemma = udpipe_analyses[0].get("lemma") if udpipe_analyses else None
+    alkhalil_lemma = alkhalil_analyses[0].get("lemma") if alkhalil_analyses else (_token_value(alkhalil_tok, "lemma") if alkhalil_tok else None)
+    udpipe_lemma = udpipe_analyses[0].get("lemma") if udpipe_analyses else (_token_value(udpipe_tok, "lemma") if udpipe_tok else None)
+    sinatools_lemma = sinatools_analyses[0].get("lemma") if sinatools_analyses else (_token_value(sinatools_tok, "lemma") if sinatools_tok else None)
 
     if camel_lemma:
         fused["final"]["lemma"] = camel_lemma
         fused["sources"]["lemma"] = "camel"
+    elif sinatools_lemma:
+        fused["final"]["lemma"] = sinatools_lemma
+        fused["sources"]["lemma"] = "sinatools"
     elif stanza_lemma:
         fused["final"]["lemma"] = stanza_lemma
         fused["sources"]["lemma"] = "stanza"
@@ -336,30 +538,63 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
         fused["final"]["lemma"] = udpipe_lemma
         fused["sources"]["lemma"] = "udpipe"
 
-    if camel_analyses:
-        fused["final"]["root"] = camel_analyses[0].get("root")
+    camel_root = _token_value(camel_tok, "root")
+    alkhalil_root = _token_value(alkhalil_tok, "root")
+    sinatools_root = _token_value(sinatools_tok, "root")
+    qalsadi_root = _token_value(qalsadi_tok, "root")
+    udpipe_root = _token_value(udpipe_tok, "root")
+
+    if camel_root:
+        fused["final"]["root"] = camel_root
         fused["final"]["root_type"] = _camel_root_type(camel_tok)
         fused["sources"]["root"] = "camel"
+    elif alkhalil_root:
+        fused["final"]["root"] = alkhalil_root
+        fused["sources"]["root"] = "alkhalil"
+    elif sinatools_root:
+        fused["final"]["root"] = sinatools_root
+        fused["sources"]["root"] = "sinatools"
+    elif qalsadi_root:
+        fused["final"]["root"] = qalsadi_root
+        fused["sources"]["root"] = "qalsadi"
+    elif udpipe_root:
+        fused["final"]["root"] = udpipe_root
+        fused["sources"]["root"] = "udpipe"
 
     if camel_analyses:
         fused["final"]["gloss"] = camel_analyses[0].get("gloss")
         fused["sources"]["gloss"] = "camel"
 
-    camel_pos_raw = fix.get("pos") or (camel_analyses[0].get("pos") if camel_analyses else None) or (qalsadi_analyses[0].get("pos") if qalsadi_analyses else None) or (alkhalil_analyses[0].get("pos") if alkhalil_analyses else None) or (udpipe_analyses[0].get("pos") if udpipe_analyses else None)
+    camel_pos_raw = (
+        fix.get("pos")
+        or (camel_analyses[0].get("pos") if camel_analyses else None)
+        or _token_value(camel_tok, "pos")
+    )
+
     stanza_pos_raw = stanza_tok.get("upos") if stanza_tok else None
+
+    if not stanza_pos_raw and udpipe_tok:
+        stanza_pos_raw = udpipe_tok.get("pos") or udpipe_tok.get("upos")
+    if not stanza_pos_raw and sinatools_tok:
+        stanza_pos_raw = sinatools_tok.get("pos") or sinatools_tok.get("upos")
     if not stanza_pos_raw and qalsadi_tok:
         stanza_pos_raw = qalsadi_tok.get("pos") or qalsadi_tok.get("upos")
     if not stanza_pos_raw and alkhalil_tok:
         stanza_pos_raw = alkhalil_tok.get("pos") or alkhalil_tok.get("upos")
-    if not stanza_pos_raw and udpipe_tok:
-        stanza_pos_raw = udpipe_tok.get("pos") or udpipe_tok.get("upos")
 
-    partial_match = _alignment_match_type(stanza_tok) == "partial_match" or _alignment_match_type(camel_tok) == "partial_match"
-    final_pos, pos_source, _, pos_notes = score_pos(camel_pos_raw, stanza_pos_raw, partial_match=partial_match)
+    partial_match = (
+        _alignment_match_type(stanza_tok) == "partial_match"
+        or _alignment_match_type(camel_tok) == "partial_match"
+    )
+
+    final_pos, pos_source, _, pos_notes = score_pos(
+        camel_pos_raw,
+        stanza_pos_raw,
+        partial_match=partial_match,
+    )
+
     fused["final"]["pos"] = final_pos
 
-    # Provenance attribution for POS must reflect the actual provider of the selected value.
-    # "agreement" is a fusion label, not a real tool.
     if pos_source == "agreement":
         fused["sources"]["pos"] = "camel" if camel_pos_raw else "stanza"
     else:
@@ -367,16 +602,14 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
 
     fused["notes"].extend(pos_notes)
 
-
-    fused["conflicts"].extend(
-        build_conflicts(
-            camel_tok=camel_tok,
-            stanza_tok=stanza_tok,
-            qalsadi_tok=qalsadi_tok,
-            alkhalil_tok=alkhalil_tok,
-            udpipe_tok=udpipe_tok,
-        )
+    raw_conflicts = build_conflicts(
+        camel_tok=camel_tok,
+        stanza_tok=stanza_tok,
+        qalsadi_tok=qalsadi_tok,
+        alkhalil_tok=alkhalil_tok,
+        udpipe_tok=udpipe_tok,
     )
+    fused["conflicts"].extend(_clean_conflicts(raw_conflicts))
 
     if camel_analyses:
         fused["final"]["gender"] = camel_analyses[0].get("gender")
@@ -386,6 +619,7 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
 
     stanza_case = stanza_tok.get("case") if stanza_tok else None
     udpipe_case = udpipe_tok.get("case") if udpipe_tok else None
+
     if stanza_case:
         fused["final"]["case"] = stanza_case
         fused["final"]["definite"] = stanza_tok.get("definite")
@@ -397,15 +631,15 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
     if _has_dependency(stanza_tok):
         fused["final"]["dependency"] = stanza_tok["dependency"]
         fused["sources"]["dependency"] = "stanza"
+    elif _has_dependency(udpipe_tok):
+        fused["final"]["dependency"] = udpipe_tok["dependency"]
+        fused["sources"]["dependency"] = "udpipe"
     elif _has_dependency(qalsadi_tok):
         fused["final"]["dependency"] = qalsadi_tok["dependency"]
         fused["sources"]["dependency"] = "qalsadi"
     elif _has_dependency(alkhalil_tok):
         fused["final"]["dependency"] = alkhalil_tok["dependency"]
         fused["sources"]["dependency"] = "alkhalil"
-    elif _has_dependency(udpipe_tok):
-        fused["final"]["dependency"] = udpipe_tok["dependency"]
-        fused["sources"]["dependency"] = "udpipe"
 
     conf_score, conf_level = compute_token_confidence(
         fused,
@@ -414,12 +648,28 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
         qalsadi_tok=qalsadi_tok,
         alkhalil_tok=alkhalil_tok,
         udpipe_tok=udpipe_tok,
+        sinatools_tok=sinatools_tok,
     )
-    udpipe_pos_raw = udpipe_tok.get("pos") or udpipe_tok.get("upos") if udpipe_tok else None
-    if final_pos and udpipe_pos_raw and normalize_pos_for_compare(udpipe_pos_raw) == final_pos:
+
+    udpipe_pos_raw = (udpipe_tok.get("pos") or udpipe_tok.get("upos")) if udpipe_tok else None
+    if final_pos and udpipe_pos_raw and _normalize_pos_for_fusion(udpipe_pos_raw) == _normalize_pos_for_fusion(final_pos):
         fused["notes"].append("UDPipe confirms POS")
+
+    sinatools_pos_raw = (sinatools_tok.get("pos") or sinatools_tok.get("upos")) if sinatools_tok else None
+    if final_pos and sinatools_pos_raw and _normalize_pos_for_fusion(sinatools_pos_raw) == _normalize_pos_for_fusion(final_pos):
+        fused["notes"].append("SinaTools supports POS")
+
+    if sinatools_lemma and fused["final"].get("lemma"):
+        if _normalize_lemma_for_fusion(sinatools_lemma) == _normalize_lemma_for_fusion(fused["final"].get("lemma")):
+            fused["notes"].append("SinaTools supports lemma")
+
+    if sinatools_root and fused["final"].get("root"):
+        if _normalize_root_for_fusion(sinatools_root) == _normalize_root_for_fusion(fused["final"].get("root")):
+            fused["notes"].append("SinaTools supports root")
+
     if stanza_case and udpipe_case and str(stanza_case).strip().lower() == str(udpipe_case).strip().lower():
         fused["notes"].append("UDPipe confirms case")
+
     fused["final"]["confidence_score"] = conf_score
     fused["final"]["confidence_level"] = conf_level
     fused["confidence"] = conf_level
@@ -447,23 +697,32 @@ def fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res=None, all
         "farasa": farasa_res,
         "qalsadi": qalsadi_res,
     }
+
     if isinstance(all_tool_results, dict):
         source_results.update(all_tool_results)
 
-    normalized = {name: normalize_tool_output(name, payload or {}) for name, payload in source_results.items()}
+    normalized = {
+        name: normalize_tool_output(name, payload or {})
+        for name, payload in source_results.items()
+    }
+
     base_tool = "farasa"
+    farasa_status = normalized.get("farasa", {}).get("status")
     farasa_tokens = normalized.get("farasa", {}).get("tokens", []) or []
+
     tool_tokens = {
         "camel": normalized.get("camel", {}).get("tokens", []) or [],
         "stanza": normalized.get("stanza", {}).get("tokens", []) or [],
         "qalsadi": normalized.get("qalsadi", {}).get("tokens", []) or [],
         "alkhalil": normalized.get("alkhalil", {}).get("tokens", []) or [],
         "udpipe": normalized.get("udpipe", {}).get("tokens", []) or [],
+        "sinatools": normalized.get("sinatools", {}).get("tokens", []) or [],
     }
 
-    base_tokens = farasa_tokens
+    base_tokens = farasa_tokens if farasa_status == "ok" else []
+
     if not base_tokens:
-        for candidate in ("camel", "stanza", "udpipe", "qalsadi", "alkhalil"):
+        for candidate in ("camel", "stanza", "udpipe", "qalsadi", "alkhalil", "sinatools"):
             candidate_tokens = tool_tokens.get(candidate) or []
             if candidate_tokens:
                 base_tool = candidate
@@ -479,15 +738,35 @@ def fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res=None, all
 
     for atok in aligned_tokens:
         word = atok.base["surface"]
+
         camel_tok = atok.tools.get("camel")
         stanza_tok = atok.tools.get("stanza")
         qalsadi_tok = atok.tools.get("qalsadi")
         alkhalil_tok = atok.tools.get("alkhalil")
         udpipe_tok = atok.tools.get("udpipe")
+        sinatools_tok = atok.tools.get("sinatools")
         farasa_tok = atok.base if base_tool == "farasa" else atok.tools.get("farasa")
 
-        fused_output.append(fuse_token(word, camel_tok, stanza_tok, farasa_tok, qalsadi_tok, alkhalil_tok, udpipe_tok))
+        fused_output.append(
+            fuse_token(
+                word,
+                camel_tok=camel_tok,
+                stanza_tok=stanza_tok,
+                farasa_tok=farasa_tok,
+                qalsadi_tok=qalsadi_tok,
+                alkhalil_tok=alkhalil_tok,
+                udpipe_tok=udpipe_tok,
+                sinatools_tok=sinatools_tok,
+            )
+        )
 
-    return {"text": text, "fusion": fused_output, "meta": {"base_tool": base_tool, "base_token_count": len(base_tokens)}}
-
-
+    return {
+        "text": text,
+        "fusion": fused_output,
+        "meta": {
+            "base_tool": base_tool,
+            "base_token_count": len(base_tokens),
+            "farasa_status": farasa_status,
+            "sinatools_tokens": len(tool_tokens.get("sinatools") or []),
+        },
+    }

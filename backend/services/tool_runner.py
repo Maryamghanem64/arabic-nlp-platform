@@ -53,27 +53,22 @@ class ToolRunner:
 
         started = time.time()
         try:
-            res = await asyncio.wait_for(asyncio.to_thread(tool.analyze, text), timeout=self.timeout_per_tool_s)
+            # IMPORTANT: do not use timeout as normal behavior.
+            # Let tools run to completion.
+            # Only use timeout as a hard safety guard (very rarely).
+            # If a tool is warming/loading it should return real "loading" state itself.
+            res = await asyncio.to_thread(tool.analyze, text)
             if not isinstance(res, dict):
                 res = {"tool": tool_name, "status": "error", "error": "invalid tool result", "tokens": []}
+
             # Normalize BEFORE caching
             raw_result = res
             normalized = normalize_tool_output(tool_name, raw_result)
             normalized.setdefault("elapsed", time.time() - started)
-
             self.cache.set(cache_key, normalized)
             return normalized
-        except asyncio.TimeoutError:
-            normalized = {
-                "tool": tool_name,
-                "status": "error",
-                "error": "timeout",
-                "input": text,
-                "word_count": 0,
-                "tokens": [],
-            }
-            return normalized
         except Exception as e:
+            # Hard failure (no fake timeout result here)
             normalized = {
                 "tool": tool_name,
                 "status": "error",

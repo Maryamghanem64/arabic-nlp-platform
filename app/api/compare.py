@@ -12,7 +12,7 @@ from backend.schemas.unified_schema import AnalysisEnvelope
 
 router = APIRouter()
 
-VALID_COMPARE_TOOLS = {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe"}
+VALID_COMPARE_TOOLS = {"camel", "farasa", "stanza", "qalsadi", "alkhalil", "udpipe", "madamira", "sinatools", "arabert"}
 
 
 def _parse_tools(tools: str) -> list[str]:
@@ -77,7 +77,7 @@ def _educational_notes(row_tools: dict, conflicts: list[dict]) -> list[str]:
 
 
 @router.get("/compare")
-def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi,alkhalil,udpipe")):
+def compare(text: str, tools: str = Query("camel,farasa,stanza,qalsadi,alkhalil,udpipe,madamira,sinatools,arabert")):
     if not text or not text.strip():
         raise HTTPException(400, "Empty text")
 

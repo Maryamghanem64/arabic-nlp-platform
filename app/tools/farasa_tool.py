@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import site
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +25,7 @@ farasa_status: Dict[str, Any] = {
     "reason": "Farasa has not been initialized yet.",
 }
 _farasa_load_attempted = False
+_FARASA_TIMEOUT_S = float(os.environ.get("FARASA_TIMEOUT_SECONDS", "30"))
 
 
 def _fallback_tokenize(text: str) -> List[str]:
@@ -154,6 +157,52 @@ def get_farasa_status() -> Dict[str, Any]:
     return payload
 
 
+def _segment_with_local_jar(text: str) -> str:
+    if farasa_model_path is None:
+        raise RuntimeError("Farasa JAR path is not resolved.")
+
+    tmp_dir = PROJECT_ROOT / ".tmp" / "farasa"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=tmp_dir, delete=False, suffix=".in", mode="w", encoding="utf-8") as input_file:
+        input_file.write(text or "")
+        input_path = Path(input_file.name)
+
+    with tempfile.NamedTemporaryFile(dir=tmp_dir, delete=False, suffix=".out", mode="w", encoding="utf-8") as output_file:
+        output_path = Path(output_file.name)
+
+    try:
+        proc = subprocess.run(
+            [
+                "java",
+                "-Dfile.encoding=UTF-8",
+                "-jar",
+                str(farasa_model_path),
+                "-i",
+                str(input_path),
+                "-o",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_FARASA_TIMEOUT_S,
+        )
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            stdout = (proc.stdout or "").strip()
+            raise RuntimeError(stderr or stdout or f"Farasa exited with code {proc.returncode}.")
+        return output_path.read_text(encoding="utf-8", errors="replace").strip()
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"Farasa exceeded {_FARASA_TIMEOUT_S:g}s") from exc
+    finally:
+        for path in (input_path, output_path):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def farasa_analyze(text: str) -> Dict[str, Any]:
     global farasa_segmenter
 
@@ -170,7 +219,7 @@ def farasa_analyze(text: str) -> Dict[str, Any]:
 
     t0 = time.time()
     try:
-        segmented = farasa_segmenter.segment(text or "")
+        segmented = _segment_with_local_jar(text or "")
         raw_tokens = simple_word_tokenize(text) if simple_word_tokenize else _fallback_tokenize(text)
         raw_segs = segmented.split()
 

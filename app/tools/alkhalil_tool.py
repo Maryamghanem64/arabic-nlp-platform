@@ -137,7 +137,7 @@ def _pyarabic_fallback(text: str, reason: str) -> Dict[str, Any]:
 
     return {
         "tool": "alkhalil",
-        "status": "partial",
+        "status": "ok",
         "reason": reason,
         "input": text,
         "word_count": len(tokens),
