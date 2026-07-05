@@ -259,6 +259,96 @@ def _values_equal_for_feature(feature: str, a: Any, b: Any) -> bool:
     return str(a).strip() == str(b).strip()
 
 
+def _clean_conflicts(conflicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cleaned: List[Dict[str, Any]] = []
+
+    for conflict in conflicts:
+        feature = conflict.get("feature")
+
+        # Case 1: pairwise conflict format
+        if "tool_a_value" in conflict and "tool_b_value" in conflict:
+            a = conflict.get("tool_a_value")
+            b = conflict.get("tool_b_value")
+
+            if not _is_valid_value(a) or not _is_valid_value(b):
+                continue
+
+            if feature == "pos":
+                norm_a = _normalize_pos_for_fusion(a)
+                norm_b = _normalize_pos_for_fusion(b)
+
+                if not norm_a or not norm_b:
+                    continue
+
+                # false conflict after normalization
+                if norm_a == norm_b:
+                    continue
+
+                conflict = {
+                    **conflict,
+                    "tool_a_value": norm_a,
+                    "tool_b_value": norm_b,
+                    "severity": conflict.get("severity", "medium"),
+                }
+
+            elif feature == "lemma":
+                norm_a = _normalize_lemma_for_fusion(a)
+                norm_b = _normalize_lemma_for_fusion(b)
+                if norm_a == norm_b:
+                    continue
+
+            elif feature == "root":
+                norm_a = _normalize_root_for_fusion(a)
+                norm_b = _normalize_root_for_fusion(b)
+                if norm_a == norm_b:
+                    continue
+
+            cleaned.append(conflict)
+            continue
+
+        # Case 2: values-dict conflict format
+        values = conflict.get("values")
+
+        if isinstance(values, dict):
+            valid_values = {
+                tool: value
+                for tool, value in values.items()
+                if _is_valid_value(value)
+            }
+
+            if len(valid_values) <= 1:
+                continue
+
+            if feature == "pos":
+                normalized = {
+                    tool: _normalize_pos_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_pos_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+            if feature == "lemma":
+                normalized = {
+                    tool: _normalize_lemma_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_lemma_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+            if feature == "root":
+                normalized = {
+                    tool: _normalize_root_for_fusion(value)
+                    for tool, value in valid_values.items()
+                    if _normalize_root_for_fusion(value)
+                }
+                if len(set(normalized.values())) <= 1:
+                    continue
+
+        cleaned.append(conflict)
+
+    return cleaned
 def compute_evidence_confidence(
     feature: str,
     selected_tool: str,
