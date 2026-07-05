@@ -115,8 +115,29 @@ def _split_lemma_alternatives(lemma: Any) -> List[str]:
     return parts or [text]
 
 
+def _clean_sinatools_lemma(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # If SinaTools stored multiple lemmas separated by '|', pick the first meaningful part.
+    if '|' in text:
+        parts = [p.strip() for p in text.split('|') if p.strip()]
+        if parts:
+            text = parts[0]
+
+    # Remove trailing sense/dictionary digits like وَجَدَ2 / فِي2 / ي1
+    text = re.sub(r"\d+$", "", text).strip()
+
+    return text or None
+
+
 def _choose_display_lemma(lemma: Any) -> Optional[str]:
     alternatives = _split_lemma_alternatives(lemma)
+
 
     if not alternatives:
         return None
@@ -274,6 +295,13 @@ def _solution_to_analysis(token: str, solution: Any, *, matched: bool = True) ->
 
     lemma_alternatives = _split_lemma_alternatives(raw_lemma)
     lemma = _choose_display_lemma(raw_lemma)
+
+    lemma = _clean_sinatools_lemma(lemma)
+    lemma_alternatives = [
+        cleaned for cleaned in (_clean_sinatools_lemma(x) for x in lemma_alternatives)
+        if cleaned
+    ]
+
     root = _normalize_root(raw_root)
     pos = _normalize_pos(raw_pos)
 
