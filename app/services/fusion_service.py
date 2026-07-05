@@ -7,6 +7,7 @@ from app.utils.constants import FUSION_WEIGHTS, KNOWN_FIXES
 from app.utils.helpers import normalize_lemma_for_compare, normalize_pos_for_compare
 from backend.services.comparison_service import build_conflicts
 from backend.services.normalizer import extract_alkhalil_canonical_pos, normalize_alkhalil_pos
+from app.services.expert_fusion_service import apply_expert_fusion
 
 
 _TOOL_RELIABILITY = {
@@ -510,17 +511,30 @@ def fusion_system(text, camel_res, stanza_res, farasa_res, qalsadi_res=None, all
     fused_output = []
     for atok in aligned_tokens:
         word = atok.base["surface"]
-        fused_output.append(
-            fuse_token(
-                word,
-                camel_tok=atok.tools.get("camel"),
-                stanza_tok=atok.tools.get("stanza"),
-                farasa_tok=atok.base if base_tool == "farasa" else atok.tools.get("farasa"),
-                qalsadi_tok=atok.tools.get("qalsadi"),
-                alkhalil_tok=atok.tools.get("alkhalil"),
-                udpipe_tok=atok.tools.get("udpipe"),
-                sinatools_tok=atok.tools.get("sinatools"),
-            )
+        classic_fused = fuse_token(
+            word,
+            camel_tok=atok.tools.get("camel"),
+            stanza_tok=atok.tools.get("stanza"),
+            farasa_tok=atok.base if base_tool == "farasa" else atok.tools.get("farasa"),
+            qalsadi_tok=atok.tools.get("qalsadi"),
+            alkhalil_tok=atok.tools.get("alkhalil"),
+            udpipe_tok=atok.tools.get("udpipe"),
+            sinatools_tok=atok.tools.get("sinatools"),
         )
+
+        expert_fused = apply_expert_fusion(
+            classic_fused=classic_fused,
+            tools={
+                "camel": atok.tools.get("camel"),
+                "stanza": atok.tools.get("stanza"),
+                "farasa": atok.base if base_tool == "farasa" else atok.tools.get("farasa"),
+                "qalsadi": atok.tools.get("qalsadi"),
+                "alkhalil": atok.tools.get("alkhalil"),
+                "udpipe": atok.tools.get("udpipe"),
+                "sinatools": atok.tools.get("sinatools"),
+            },
+        )
+
+        fused_output.append(expert_fused)
 
     return {"text": text, "fusion": fused_output, "meta": {"base_tool": base_tool, "base_token_count": len(base_tokens), "farasa_status": farasa_status, "sinatools_tokens": len(tool_tokens.get("sinatools") or [])}}
