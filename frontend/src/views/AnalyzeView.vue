@@ -81,7 +81,7 @@
                 {{ statusBadge(tool.key).label }}
               </span>
             </div>
-            <span class="selector-subtitle">{{ tool.type }}</span>
+            <span class="selector-subtitle">{{ toolRole(tool.key) }}</span>
           </div>
         </button>
       </div>
@@ -165,7 +165,7 @@
     <div v-if="loading" class="loading-state analysis-loading">
       <div class="loading-stack">
         <span class="spinner--dark" aria-hidden="true"></span>
-        <span>Loading analysis...</span>
+        <span>Running analyzer tools...</span>
       </div>
     </div>
 
@@ -204,7 +204,7 @@
                   <span class="tool-result-bar" :style="{ backgroundColor: tool.color }"></span>
                   <div>
                     <h3>{{ tool.label }}</h3>
-                    <p>{{ tool.type }}</p>
+                    <p>{{ toolRole(tool.key) }}</p>
                   </div>
                 </div>
                 <span :class="['pill', statusPill(resultStatus(tool.key))]">{{ statusLabel(resultStatus(tool.key)) }}</span>
@@ -253,10 +253,10 @@
                   </tbody>
                 </table>
               </div>
-              <div v-else-if="isRenderableToolStatus(resultStatus(tool.key))" class="empty-state">No token output is available for this tool.</div>
+              <div v-else-if="isRenderableToolStatus(resultStatus(tool.key))" class="empty-state">{{ emptyToolOutputLabel(tool.key) }}</div>
               <div v-else class="status-card">
                 <strong>{{ statusLabel(resultStatus(tool.key)) }}</strong>
-                <p>{{ resultReason(tool.key) || 'The backend returned a safe unavailable response.' }}</p>
+                <p>{{ resultReason(tool.key) || statusDescription(resultStatus(tool.key)) }}</p>
               </div>
             </article>
 
@@ -270,7 +270,7 @@
                 <span class="tool-result-bar" :style="{ backgroundColor: selectedToolMeta.color }"></span>
                 <div>
                   <h3>{{ selectedToolMeta.label }}</h3>
-                  <p>{{ selectedToolMeta.type }}</p>
+              <p>{{ toolRole(selectedTool) }}</p>
                 </div>
               </div>
               <span :class="['pill', statusPill(resultStatus(selectedTool))]">{{ statusLabel(resultStatus(selectedTool)) }}</span>
@@ -321,7 +321,7 @@
             </div>
             <div v-else class="status-card">
               <strong>{{ statusLabel(resultStatus(selectedTool)) }}</strong>
-              <p>{{ resultReason(selectedTool) || 'The backend returned a safe unavailable response.' }}</p>
+              <p>{{ resultReason(selectedTool) || statusDescription(resultStatus(selectedTool)) }}</p>
             </div>
           </article>
         </div>
@@ -333,6 +333,13 @@
               <p class="section-subtitle">Fusion is shown only in All tools mode, as requested.</p>
             </div>
             <button class="btn btn-secondary" @click="loadFusion">Refresh Fusion</button>
+          </div>
+
+          <div v-if="fusionLoading" class="info-state">
+            Analyzer outputs are ready. Fusion evidence is still being prepared.
+          </div>
+          <div v-if="fusionError" class="info-state info-state--warn">
+            Fusion evidence is unavailable for this run: {{ fusionError }}
           </div>
 
           <div v-if="fusionRows.length" class="table-scroll fusion-table">
@@ -404,7 +411,7 @@
               </tbody>
             </table>
           </div>
-          <div v-else class="empty-state">Fusion output is not available for this run.</div>
+          <div v-else-if="!fusionLoading" class="empty-state">Fusion output is not available for this run.</div>
         </div>
 
         <div v-if="activeTab === 'json'" class="tab-panel">
@@ -424,22 +431,23 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
 import EmptyCell from '../components/tables/EmptyCell.vue'
 import ScientificChart from '../components/charts/ScientificChart.vue'
 import HeatmapMatrix from '../components/charts/HeatmapMatrix.vue'
-import { API_BASE_URL, exportUrl } from '../api/nlpApi'
+import { analyzeAll, analyzeTool, exportUrl, fusionText } from '../api/nlpApi'
 import { TOOL_CONFIG, TOOL_KEYS, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
 import { canonicalToken } from '../utils/tokenModel'
 import { recordAnalysis } from '../utils/analysisHistory'
-import { preloadSinaTools, getToolsStatus as fetchToolsStatus } from '../api/nlpApi'
+import { canRenderToolEvidence, missingValueLabel, statusDisplay, toolRole } from '../utils/researchSemantics'
 
 const route = useRoute()
 const inputText = ref('')
 
 const loading = ref(false)
+const fusionLoading = ref(false)
 const error = ref('')
+const fusionError = ref('')
 const rawResults = ref(null)
 const fusionPayload = ref(null)
 const selectedTool = ref('all')
@@ -448,6 +456,7 @@ const copied = ref(false)
 const pendingTool = ref('')
 const selectionNotice = ref(null)
 const lastRunSummary = ref('')
+const runId = ref(0)
 
 // SinaTools preload UX
 const sinatoolsCardState = ref('') // '', 'lazy_not_loaded', 'loading', 'loaded', 'error'
@@ -548,22 +557,18 @@ const hasResults = computed(() => Boolean(rawResults.value || fusionPayload.valu
 const jsonExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'json') : '#'))
 const csvExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'csv') : '#'))
 const prettyJson = computed(() => JSON.stringify({ analysis: rawResults.value, fusion: fusionPayload.value }, null, 2))
+const fusionRows = computed(() => fusionPayload.value || [])
+const allToolRows = computed(() =>
+  TOOL_KEYS.flatMap((toolKey) =>
+    toolRows(toolKey).map((row) => ({
+      ...row,
+      tool: toolKey,
+    })),
+  ),
+)
 const currentRows = computed(() => {
   if (selectedTool.value === 'all') {
-    return (fusionPayload.value || []).map((row, index) => ({
-      index,
-      surface: row.word,
-      confidence: Number(row?.final?.confidence_score ?? row?.final?.confidence ?? row?.confidence_score ?? 0),
-      values: {
-        lemma: row?.final?.lemma,
-        root: row?.final?.root,
-        pos: row?.final?.pos,
-        segmentation: row?.final?.segmentation,
-        dependency: row?.final?.dependency,
-        confidence_score: row?.final?.confidence_score,
-        confidence_level: row?.final?.confidence_level,
-      },
-    }))
+    return allToolRows.value
   }
   return toolRows(selectedTool.value)
 })
@@ -654,7 +659,7 @@ const toolContributionChart = computed(() => {
 })
 const tabs = computed(() => [
   { key: 'results', label: selectedTool.value === 'all' ? 'All tools' : 'Token breakdown' },
-  { key: 'fusion', label: 'Fusion' },
+  ...(selectedTool.value === 'all' ? [{ key: 'fusion', label: fusionLoading.value ? 'Fusion loading' : 'Fusion' }] : []),
   { key: 'json', label: 'JSON' },
 ])
 
@@ -667,13 +672,13 @@ const TOOL_TABLE_COLUMNS = {
     { key: 'gender', label: 'Gender' },
     { key: 'number', label: 'Number' },
     { key: 'tense', label: 'Tense' },
-    { key: 'confidence', label: 'Confidence', virtual: true },
+    { key: 'gloss', label: 'Gloss' },
   ],
   alkhalil: [
     { key: 'lemma', label: 'Lemma' },
     { key: 'root', label: 'Root' },
-    { key: 'pos', label: 'POS' },
-    { key: 'confidence', label: 'Confidence', virtual: true },
+    { key: 'pos', label: 'Canonical POS' },
+    { key: 'analysis', label: 'Morphological analysis', virtual: true },
   ],
   sinatools: [
     { key: 'lemma', label: 'Lemma' },
@@ -693,14 +698,15 @@ const TOOL_TABLE_COLUMNS = {
   stanza: [
     { key: 'lemma', label: 'Lemma' },
     { key: 'pos', label: 'UD POS' },
-    { key: 'dependency', label: 'Dependency' },
-    { key: 'gender', label: 'Gender' },
-    { key: 'number', label: 'Number' },
+    { key: 'case', label: 'Case' },
+    { key: 'deprel', label: 'Dependency relation' },
+    { key: 'head', label: 'Head' },
   ],
   udpipe: [
     { key: 'lemma', label: 'Lemma' },
     { key: 'pos', label: 'UD POS' },
-    { key: 'dependency', label: 'Dependency' },
+    { key: 'deprel', label: 'Dependency relation' },
+    { key: 'head', label: 'Head' },
   ],
   farasa: [
     { key: 'segmentation', label: 'Segmentation' },
@@ -708,7 +714,7 @@ const TOOL_TABLE_COLUMNS = {
   ],
   qalsadi: [
     { key: 'lemma', label: 'Lemma' },
-    { key: 'stem', label: 'Stem' },
+    { key: 'pos', label: 'POS', optional: true },
     { key: 'evidence', label: 'Lemmatization Evidence', virtual: true },
   ],
   arabert: [
@@ -718,7 +724,11 @@ const TOOL_TABLE_COLUMNS = {
 }
 
 function toolTableColumns(toolKey) {
-  return TOOL_TABLE_COLUMNS[toolKey] || []
+  const columns = TOOL_TABLE_COLUMNS[toolKey] || []
+  return columns.filter((column) => {
+    if (!column.optional) return true
+    return toolRows(toolKey).some((row) => hasTokenValue(row.values?.[column.key]))
+  })
 }
 
 function toolExpectedFields(toolKey) {
@@ -779,12 +789,12 @@ function evidenceStatusForTool(toolKey, row) {
 }
 
 function toolCellValue(toolKey, field, row) {
-  if (field === 'confidence') {
-    return row.confidence || 'Not reported'
-  }
-
   if (field === 'evidence') {
     return evidenceStatusForTool(toolKey, row).label
+  }
+
+  if (field === 'analysis') {
+    return row.values?.analysis || 'Raw analysis not returned'
   }
 
   if (field === 'contextual') {
@@ -799,15 +809,14 @@ function toolCellValue(toolKey, field, row) {
       return 'Contextual representation available'
     }
 
-    return 'No direct morphology fields'
+    return 'Contextual model only - no direct morphology labels'
   }
 
-  return displayTokenValue(field, row?.values?.[field])
+  return displayTokenValue(toolKey, field, row?.values?.[field], resultStatus(toolKey))
 }
 
 function toolCellClass(toolKey, field, row) {
   if (field === 'pos') return 'pos-compact'
-  if (field === 'confidence') return ['pill', confidencePill(row.confidence)]
   if (field === 'evidence') {
     return [
       'evidence-status',
@@ -817,7 +826,7 @@ function toolCellClass(toolKey, field, row) {
   if (['lemma', 'root', 'stem', 'segmentation'].includes(field)) {
     return 'arabic-value compact-primary-value'
   }
-  if (field === 'dependency') return 'dependency-value'
+  if (['dependency', 'deprel', 'head'].includes(field)) return 'dependency-value'
   if (field === 'contextual') return 'contextual-value'
   return 'compact-secondary'
 }
@@ -851,14 +860,15 @@ function selectTool(toolKey) {
   }
 
   const status = toolStatus(toolKey)
-  if (status === 'ok' || status === 'partial' || status === 'lazy' || status === 'unknown') {
+  const display = statusDisplay(status)
+  if (['available', 'partial', 'lazy', 'loading', 'unknown'].includes(display.group)) {
     selectedTool.value = toolKey
     selectionNotice.value =
-      status === 'lazy'
+      display.group === 'lazy'
         ? {
             kind: 'info',
             title: `${TOOL_CONFIG[toolKey].label} loads on demand`,
-            message: 'This tool may be slower the first time it is selected.',
+            message: 'This local resource is lazy and is not loaded by normal analysis pages.',
             pending: false,
           }
         : null
@@ -890,44 +900,55 @@ async function analyze() {
   if (!inputText.value.trim()) return
   if (statusLoading.value && !toolStatusesLoaded.value) await refresh()
 
+  const currentRunId = ++runId.value
   loading.value = true
+  fusionLoading.value = false
   error.value = ''
+  fusionError.value = ''
   rawResults.value = null
   fusionPayload.value = null
   copied.value = false
 
   try {
-    const response =
+    const data =
       selectedTool.value === 'all'
-        ? await axios.get(`${API_BASE_URL}/analyze-combined`, { params: { text: inputText.value } })
-        : await axios.get(`${API_BASE_URL}/analyze/${selectedTool.value}`, { params: { text: inputText.value } })
+        ? await analyzeAll(inputText.value)
+        : await analyzeTool(selectedTool.value, inputText.value)
 
-    rawResults.value = response.data
+    if (currentRunId !== runId.value) return
+    rawResults.value = data
     if (selectedTool.value === 'all') {
-      await loadFusion()
+      loadFusion(currentRunId)
     }
     captureRunSummary()
   } catch (e) {
-    error.value = readError(e, 'Failed to connect to the backend.')
+    if (currentRunId === runId.value) error.value = readError(e, 'Failed to connect to the backend.')
   } finally {
-    loading.value = false
+    if (currentRunId === runId.value) loading.value = false
   }
 }
 
-async function loadFusion() {
+async function loadFusion(currentRunId = runId.value) {
   if (!inputText.value.trim()) return
+  fusionLoading.value = true
+  fusionError.value = ''
   try {
-    const { data } = await axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } })
+    const data = await fusionText(inputText.value)
+    if (currentRunId !== runId.value) return
     fusionPayload.value = normalizeFusionRows(data)
-  } catch {
+  } catch (e) {
+    if (currentRunId !== runId.value) return
     fusionPayload.value = []
+    fusionError.value = e?.message || 'Detailed fusion payload was not returned.'
+  } finally {
+    if (currentRunId === runId.value) fusionLoading.value = false
   }
 }
 
 function toolRows(toolKey) {
   const payload = toolPayloadForKey(toolKey)
   const tokens = Array.isArray(payload?.tokens) ? payload.tokens : []
-  const fields = toolTableColumns(toolKey)
+  const fields = (TOOL_TABLE_COLUMNS[toolKey] || [])
     .filter((column) => !column.virtual)
     .map((column) => column.key)
 
@@ -937,6 +958,10 @@ function toolRows(toolKey) {
 
     for (const field of fields) {
       values[field] = readField(best, field)
+    }
+
+    if (toolKey === 'alkhalil') {
+      values.analysis = summarizeAnalysis(best)
     }
 
     return {
@@ -954,14 +979,15 @@ function toolColumns(toolKey) {
 
 function normalizeFusionRows(payload) {
   if (!payload) return []
+  const source = payload?.data || payload
   const rows = Array.isArray(payload)
     ? payload
-    : Array.isArray(payload?.fusion)
-      ? payload.fusion
-      : Array.isArray(payload?.fusion_result?.fusion)
-        ? payload.fusion_result.fusion
-        : Array.isArray(payload?.result)
-          ? payload.result
+    : Array.isArray(source?.fusion)
+      ? source.fusion
+      : Array.isArray(source?.fusion_result?.fusion)
+        ? source.fusion_result.fusion
+        : Array.isArray(source?.result)
+          ? source.result
           : []
 
   return rows.map((row, index) => ({
@@ -1059,7 +1085,23 @@ function readField(raw, field) {
     return deprel ? (dependency.head_text ? `${deprel} -> ${dependency.head_text}` : deprel) : ''
   }
 
+  if (field === 'deprel') {
+    const dependency = raw.dependency || raw.dep || {}
+    return dependency.deprel || raw.deprel || ''
+  }
+
+  if (field === 'head') {
+    const dependency = raw.dependency || raw.dep || {}
+    return dependency.head_text || dependency.head || raw.head || ''
+  }
+
   return raw[field] || ''
+}
+
+function summarizeAnalysis(raw) {
+  const analysis = Array.isArray(raw?.analyses) ? raw.analyses[0] : null
+  if (!analysis || typeof analysis !== 'object') return ''
+  return analysis.type || analysis.gloss || analysis.pos || ''
 }
 
 
@@ -1105,12 +1147,12 @@ function isArabicField(field) {
 }
 
 function formatCellValue(field, value) {
-  if (!hasTokenValue(value)) return missingFieldLabel(field)
+  if (!hasTokenValue(value)) return missingFieldLabel(selectedTool.value, field, resultStatus(selectedTool.value))
   if (Array.isArray(value)) return value.join(' + ')
 
   if (field === 'segmentation') {
     if (Array.isArray(value)) return value.join(' + ')
-    if (!value) return missingFieldLabel(field)
+    if (!value) return missingFieldLabel(selectedTool.value, field, resultStatus(selectedTool.value))
     return String(value)
   }
 
@@ -1126,34 +1168,21 @@ function cellClass(field, value) {
 }
 
 function statusBadge(toolKey) {
-  const status = toolStatus(toolKey)
-  if (status === 'ok') return { show: false, label: '', className: '' }
-  if (status === 'error') return { show: true, label: 'error', className: 'pill-red' }
-  if (status === 'unavailable') return { show: true, label: 'unavailable', className: 'pill-gray' }
-  if (status === 'lazy') return { show: true, label: '~700MB', className: 'pill-amber' }
-  if (status === 'future_work') return { show: true, label: 'planned', className: 'pill-gray' }
-  return { show: true, label: 'status unknown', className: 'pill-gray' }
+  const display = statusDisplay(toolStatus(toolKey), toolReason(toolKey))
+  if (display.status === 'ok' || display.status === 'loaded') return { show: false, label: '', className: '' }
+  return { show: true, label: display.label, className: display.className }
 }
 
 function statusLabel(status) {
-  if (status === 'ok') return 'active'
-  if (status === 'error') return 'error'
-  if (status === 'unavailable') return 'unavailable'
-  if (status === 'lazy') return 'loads on demand'
-  if (status === 'lazy_not_loaded') return 'Loading model...'
-  if (status === 'future_work') return 'planned'
-  return 'status unknown'
+  return statusDisplay(status).label
 }
 
 function isRenderableToolStatus(status) {
-  return ['ok', 'partial', 'lazy', 'unknown'].includes(status)
+  return canRenderToolEvidence(status)
 }
 
 function statusPill(status) {
-  if (status === 'ok') return 'pill-green'
-  if (status === 'error') return 'pill-red'
-  if (status === 'unavailable' || status === 'future_work' || status === 'unknown') return 'pill-gray'
-  return 'pill-amber'
+  return statusDisplay(status).className
 }
 
 function confidencePill(value) {
@@ -1172,25 +1201,39 @@ function severityPill(value) {
   return 'pill-gray'
 }
 
-function missingFieldLabel(field) {
-  if (['lemma', 'root', 'pos', 'gloss'].includes(field)) return 'Not recognized'
-  if (['segmentation', 'dependency'].includes(field)) return 'No data available'
-  return 'No data available'
+function missingFieldLabel(toolKey, field, status = 'ok') {
+  return missingValueLabel(toolKey, field, status)
 }
 
-function displayTokenValue(field, value) {
+function displayTokenValue(toolOrField, fieldOrValue, maybeValue, maybeStatus) {
+  const usingLegacySignature = maybeValue === undefined
+  const toolKey = usingLegacySignature ? selectedTool.value : toolOrField
+  const field = usingLegacySignature ? toolOrField : fieldOrValue
+  const value = usingLegacySignature ? fieldOrValue : maybeValue
+  const status = maybeStatus || resultStatus(toolKey)
   if (Array.isArray(value)) {
-    return value.length ? value.join(' + ') : missingFieldLabel(field)
+    return value.length ? value.join(' + ') : missingFieldLabel(toolKey, field, status)
   }
   if (!hasTokenValue(value)) {
-    return missingFieldLabel(field)
+    return missingFieldLabel(toolKey, field, status)
   }
   return String(value)
 }
 
 function displayConflictValue(value) {
-  if (!hasTokenValue(value)) return 'Not recognized'
+  if (!hasTokenValue(value)) return 'Not returned'
   return String(value)
+}
+
+function statusDescription(status) {
+  return statusDisplay(status).label
+}
+
+function emptyToolOutputLabel(toolKey) {
+  const status = resultStatus(toolKey)
+  if (toolKey === 'arabert') return 'Contextual metadata was not returned for this run.'
+  if (toolKey === 'madamira') return 'MADAMIRA is excluded - missing licensed resources.'
+  return missingValueLabel(toolKey, '*', status)
 }
 
 function hasTokenValue(value) {
@@ -1405,6 +1448,22 @@ function captureRunSummary() {
   min-height: 170px;
 }
 
+.info-state {
+  padding: 12px 14px;
+  border: 1px solid var(--c-accent-border);
+  border-radius: 10px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.info-state--warn {
+  border-color: var(--c-warning-border);
+  background: var(--c-warning-bg);
+  color: var(--c-warning-text);
+}
+
 .loading-stack {
   width: min(520px, 100%);
   display: grid;
@@ -1467,7 +1526,9 @@ function captureRunSummary() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+  min-width: 0;
   padding-top: 10px;
   border-top: 4px solid transparent;
 }
@@ -1476,6 +1537,14 @@ function captureRunSummary() {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  min-width: 0;
+  flex: 1 1 190px;
+}
+
+.tool-result-head .pill {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 .tool-result-bar {
@@ -1503,6 +1572,8 @@ function captureRunSummary() {
 }
 
 .status-card {
+  max-width: 100%;
+  min-width: 0;
   padding: 16px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-card);
@@ -1511,11 +1582,13 @@ function captureRunSummary() {
 
 .status-card strong {
   display: block;
+  overflow-wrap: anywhere;
   font-weight: 500;
 }
 
 .status-card p {
   margin: 6px 0 0;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
@@ -2103,5 +2176,3 @@ function captureRunSummary() {
 }
 
 </style>
-
-

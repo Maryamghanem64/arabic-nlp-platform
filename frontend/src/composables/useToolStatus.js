@@ -2,9 +2,8 @@ import { computed, onMounted, ref } from 'vue'
 import { getToolsStatus, getStatus } from '../api/nlpApi'
 
 import { TOOL_KEYS } from '../config/tools'
+import { statusGroupsFromMap } from '../utils/researchSemantics'
 
-const EXCLUDED_TOOLS = new Set(['madamira'])
-const COUNTABLE_STATUSES = new Set(['ok', 'partial', 'lazy', 'loading'])
 const HEAVY_LAZY_TOOLS = new Set(['stanza', 'arabert', 'sinatools'])
 
 export function useToolStatus() {
@@ -12,9 +11,15 @@ export function useToolStatus() {
   const loading = ref(true)
   const error = ref(null)
 
-  const activeTools = computed(() =>
-    TOOL_KEYS.filter((tool) => !EXCLUDED_TOOLS.has(tool) && COUNTABLE_STATUSES.has(toolStatuses.value[tool]?.status)),
-  )
+  const groupedStatuses = computed(() => statusGroupsFromMap(toolStatuses.value))
+  const activeTools = computed(() => groupedStatuses.value.activeTools)
+  const partialTools = computed(() => groupedStatuses.value.partialTools)
+  const lazyTools = computed(() => groupedStatuses.value.lazyTools)
+  const loadingTools = computed(() => groupedStatuses.value.loadingTools)
+  const excludedTools = computed(() => groupedStatuses.value.excludedTools)
+  const unavailableTools = computed(() => groupedStatuses.value.unavailableTools)
+  const errorTools = computed(() => groupedStatuses.value.errorTools)
+  const degradedTools = computed(() => groupedStatuses.value.degradedTools)
 
   function normalizeStatuses(payload) {
     const raw = payload?.tools || payload?.data?.tools || payload?.statuses || payload?.data?.statuses || payload || {}
@@ -61,7 +66,15 @@ export function useToolStatus() {
 
   return {
     toolStatuses,
+    groupedStatuses,
     activeTools,
+    partialTools,
+    lazyTools,
+    loadingTools,
+    excludedTools,
+    unavailableTools,
+    errorTools,
+    degradedTools,
     loading,
     error,
     refresh,

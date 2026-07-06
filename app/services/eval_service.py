@@ -88,6 +88,22 @@ DEPENDENCY_CAPABLE = {
     "udpipe",
 }
 
+FUNCTIONAL_ROOT_POS = {
+    "ADP",
+    "PART",
+    "CCONJ",
+    "SCONJ",
+    "DET",
+}
+
+POS_DECISION_WEIGHTS = {
+    "stanza": 1.00,
+    "udpipe": 0.90,
+    "camel": 0.82,
+    "sinatools": 0.72,
+    "alkhalil": 0.55,
+}
+
 
 # ============================================================
 # DYNAMIC ALIGNMENT BASE PRIORITY
@@ -384,6 +400,75 @@ def _majority_agreement(
         majority_count / len(values),
         majority_value,
     )
+
+
+def _clear_functional_pos_decision(
+    values: Dict[str, str],
+) -> Optional[str]:
+
+    if not values:
+        return None
+
+    weighted: Dict[str, float] = {}
+    counted: Counter[str] = Counter()
+
+    for tool, value in values.items():
+        normalized = (
+            str(value).strip().upper()
+            if value is not None
+            else ""
+        )
+
+        if not normalized:
+            continue
+
+        counted[normalized] += 1
+        weighted[normalized] = (
+            weighted.get(normalized, 0.0)
+            + POS_DECISION_WEIGHTS.get(tool, 0.50)
+        )
+
+    if not weighted:
+        return None
+
+    weighted_ranked = sorted(
+        weighted.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    weighted_pos, weighted_score = weighted_ranked[0]
+    weighted_second = (
+        weighted_ranked[1][1]
+        if len(weighted_ranked) > 1
+        else 0.0
+    )
+
+    if (
+        weighted_pos in FUNCTIONAL_ROOT_POS
+        and weighted_score > weighted_second
+    ):
+        return weighted_pos
+
+    counted_ranked = counted.most_common()
+
+    if not counted_ranked:
+        return None
+
+    majority_pos, majority_count = counted_ranked[0]
+    majority_second = (
+        counted_ranked[1][1]
+        if len(counted_ranked) > 1
+        else 0
+    )
+
+    if (
+        majority_pos in FUNCTIONAL_ROOT_POS
+        and majority_count > majority_second
+    ):
+        return majority_pos
+
+    return None
 
 
 def _pairwise_conflicts(
@@ -703,6 +788,15 @@ def evaluate_tools(
 
     segmentation_evaluated_tokens = 0
 
+    metric_contributor_sets: Dict[str, set[str]] = {
+        "pos": set(),
+        "lemma": set(),
+        "root": set(),
+        "segmentation": set(),
+        "dependency": set(),
+        "contextual": set(),
+    }
+
     # --------------------------------------------------------
     # Evaluate aligned tokens
     # --------------------------------------------------------
@@ -726,6 +820,23 @@ def evaluate_tools(
                 contributors["segmentation"],
             ):
                 seg_covered += 1
+
+            for tool in contributors["segmentation"]:
+
+                tok = aligned.tools.get(tool)
+
+                if not isinstance(tok, dict):
+                    continue
+
+                segmentation = tok.get("segmentation")
+
+                if (
+                    isinstance(segmentation, list)
+                    and segmentation
+                ):
+                    metric_contributor_sets[
+                        "segmentation"
+                    ].add(tool)
 
         # ----------------------------------------------------
         # POS values
@@ -820,6 +931,10 @@ def evaluate_tools(
 
             pos_evaluated_tokens += 1
 
+            metric_contributor_sets["pos"].update(
+                pos_values.keys()
+            )
+
             token_tools = set(pos_values.keys())
             sinatools_involved = "sinatools" in token_tools
 
@@ -864,6 +979,10 @@ def evaluate_tools(
 
             lemma_evaluated_tokens += 1
 
+            metric_contributor_sets["lemma"].update(
+                lemma_values.keys()
+            )
+
             lemma_conflicts.extend(
                 _pairwise_conflicts(
                     word=word,
@@ -876,7 +995,14 @@ def evaluate_tools(
         # Root agreement
         # ----------------------------------------------------
 
-        if len(root_values) >= 2:
+        functional_pos = _clear_functional_pos_decision(
+            pos_values
+        )
+
+        if (
+            len(root_values) >= 2
+            and functional_pos is None
+        ):
 
             score, _majority = _majority_agreement(
                 root_values
@@ -885,6 +1011,10 @@ def evaluate_tools(
             root_scores.append(score)
 
             root_evaluated_tokens += 1
+
+            metric_contributor_sets["root"].update(
+                root_values.keys()
+            )
 
             root_conflicts.extend(
                 _pairwise_conflicts(
@@ -1032,12 +1162,20 @@ def evaluate_tools(
         "capability_contributors": contributors,
 
         "metric_contributors": {
-            "pos": contributors["pos"],
-            "lemma": contributors["lemma"],
-            "root": contributors["root"],
-            "segmentation": contributors[
-                "segmentation"
-            ],
+            "pos": sorted(
+                metric_contributor_sets["pos"]
+            ),
+            "lemma": sorted(
+                metric_contributor_sets["lemma"]
+            ),
+            "root": sorted(
+                metric_contributor_sets["root"]
+            ),
+            "segmentation": sorted(
+                metric_contributor_sets[
+                    "segmentation"
+                ]
+            ),
             "dependency": contributors[
                 "dependency"
             ],

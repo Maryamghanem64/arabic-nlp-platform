@@ -209,9 +209,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
 import EmptyCell from '../components/tables/EmptyCell.vue'
-import { API_BASE_URL, exportUrl } from '../api/nlpApi'
+import { analyzeAll, compareText, exportUrl } from '../api/nlpApi'
 import { TOOL_CONFIG, FEATURE_ELIGIBILITY, toolOrder } from '../config/tools'
 import { useToolStatus } from '../composables/useToolStatus'
 import { canonicalToken } from '../utils/tokenModel'
@@ -234,6 +233,7 @@ const comparisonPayload = ref(null)
 const combinedPayload = ref(null)
 const copied = ref(false)
 const activeView = ref('aligned')
+const runId = ref(0)
 const viewModes = [
   { key: 'aligned', label: 'Aligned table' },
   { key: 'conflicts', label: 'Conflict view' },
@@ -325,6 +325,7 @@ async function compare() {
   if (!inputText.value.trim()) return
   if (statusLoading.value && !toolStatusesLoaded.value) await refresh()
 
+  const currentRunId = ++runId.value
   loading.value = true
   error.value = ''
   comparisonPayload.value = null
@@ -333,27 +334,24 @@ async function compare() {
 
   try {
     const toolParam = compareEnabledTools.join(',')
-    const [compareResponse, combinedResponse] = await Promise.all([
-      axios.get(`${API_BASE_URL}/compare`, {
-        params: { text: inputText.value, tools: toolParam },
-      }),
-      axios.get(`${API_BASE_URL}/analyze-combined`, {
-        params: { text: inputText.value },
-      }).catch(() => ({ data: null })),
+    const [comparePayload, combinedData] = await Promise.all([
+      compareText(inputText.value, toolParam),
+      analyzeAll(inputText.value).catch(() => null),
     ])
+    if (currentRunId !== runId.value) return
 
-    comparisonPayload.value = compareResponse.data
-    combinedPayload.value = combinedResponse.data
+    comparisonPayload.value = comparePayload?.data || comparePayload
+    combinedPayload.value = combinedData
 
     recordAnalysis({
       page: 'Compare',
       text: inputText.value.trim(),
-      summary: `${compareCols.value.length} displayed analyzers | ${(compareResponse.data?.comparison || []).length} aligned tokens`,
+      summary: `${compareCols.value.length} displayed analyzers | ${(comparisonPayload.value?.comparison || []).length} aligned tokens`,
     })
   } catch (e) {
-    error.value = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Failed to connect to the backend.'
+    if (currentRunId === runId.value) error.value = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Failed to connect to the backend.'
   } finally {
-    loading.value = false
+    if (currentRunId === runId.value) loading.value = false
   }
 }
 

@@ -73,6 +73,21 @@
         </div>
       </section>
 
+      <section class="fusion-participation-grid" aria-label="Fusion tool participation">
+        <article class="participation-card">
+          <span class="summary-label">Active evidence tools</span>
+          <strong>{{ activeTools.length ? activeTools.join(' / ') : 'Not reported' }}</strong>
+        </article>
+        <article class="participation-card">
+          <span class="summary-label">Degraded tools</span>
+          <strong>{{ degradedTools.length ? degradedTools.join(' / ') : 'None reported' }}</strong>
+        </article>
+        <article class="participation-card">
+          <span class="summary-label">Excluded tools</span>
+          <strong>{{ excludedTools.length ? excludedTools.join(' / ') : 'None reported' }}</strong>
+        </article>
+      </section>
+
       <section class="fusion-method-grid">
         <article class="panel panel-pad decision-policy">
           <span class="feature-label">Decision policy</span>
@@ -121,6 +136,7 @@
               </div>
               <span v-if="hasValue(token.final.lemma)" class="feature-value arabic-value">{{ token.final.lemma }}</span>
               <EmptyCell v-else />
+              <small class="source-line">{{ primarySourceLabel(token, 'lemma') }}</small>
             </div>
 
             <div class="feature-item">
@@ -133,6 +149,7 @@
                 <span v-if="token.final.root_type" class="root-type-badge">{{ rootTypeLabel(token.final.root_type) }}</span>
               </template>
               <EmptyCell v-else />
+              <small class="source-line">{{ primarySourceLabel(token, 'root') }}</small>
             </div>
 
             <div class="feature-item">
@@ -144,6 +161,7 @@
                 {{ POS_AR[token.final.pos] || token.final.pos }}
               </span>
               <EmptyCell v-else />
+              <small class="source-line">{{ primarySourceLabel(token, 'pos') }}</small>
             </div>
 
             <div v-if="hasValue(token.final.gloss)" class="feature-item">
@@ -237,6 +255,7 @@
                     >
                       {{ item.value }}
                     </span>
+                    <span v-if="item.score !== undefined" class="candidate-score">{{ item.score }}</span>
                     <span v-if="sourceFor(token, feature, '') === item.tool" class="selected-chip">selected</span>
                   </div>
                 </div>
@@ -250,14 +269,24 @@
             <button class="trace-toggle btn-ghost" type="button" @click="toggleTrace(idx)">
               {{ showTrace[idx] ? 'Hide decision trace' : 'Show decision trace' }}
             </button>
-            <div v-if="showTrace[idx]" class="trace-body">
-              <div v-for="row in traceRows(token)" :key="row.feature" class="trace-row">
-                <span class="trace-feature">{{ featureLabel(row.feature) }}</span>
-                <ToolBadge :tool="row.tool" />
-                <span class="trace-value">{{ row.value }}</span>
-                <small class="trace-support">{{ row.explanation }}</small>
+              <div v-if="showTrace[idx]" class="trace-body">
+                <div v-for="row in traceRows(token)" :key="row.feature" class="trace-row">
+                  <span class="trace-feature">{{ featureLabel(row.feature) }}</span>
+                <ToolBadge v-if="traceSource(row)" :tool="traceSource(row)" />
+                <span class="trace-value">{{ traceValue(row) }}</span>
+                <small class="trace-support">
+                  <span v-if="row.expert">{{ row.expert }}</span>
+                  <span v-if="row.strategy">Strategy: {{ formatStrategy(row.strategy) }}</span>
+                  <span v-if="row.confidence_score !== undefined">Confidence score: {{ row.confidence_score }}</span>
+                  <span v-if="row.confidence_level">Confidence level: {{ row.confidence_level }}</span>
+                  <span v-if="row.score_margin !== undefined && row.score_margin !== null">Decision margin: {{ row.score_margin }}</span>
+                  <span v-if="row.ambiguity">Ambiguous evidence</span>
+                  <span v-if="Array.isArray(row.supporting_tools) && row.supporting_tools.length">Supporting: {{ row.supporting_tools.join(' / ') }}</span>
+                  <span v-if="Array.isArray(row.disagreeing_tools) && row.disagreeing_tools.length">Disagreeing: {{ row.disagreeing_tools.join(' / ') }}</span>
+                  <span v-if="row.note">{{ row.note }}</span>
+                </small>
               </div>
-              <div v-if="!traceRows(token).length" class="null-value">No additional decision details were returned.</div>
+              <div v-if="!traceRows(token).length" class="null-value">Detailed decision trace was not returned for this feature.</div>
             </div>
           </section>
 
@@ -303,24 +332,28 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import axios from 'axios'
 import ConfidenceBadge from '@/components/badges/ConfidenceBadge.vue'
 import EmptyCell from '@/components/tables/EmptyCell.vue'
 import ToolBadge from '@/components/badges/ToolBadge.vue'
 import ScientificChart from '@/components/charts/ScientificChart.vue'
-import { API_BASE_URL } from '@/api/nlpApi'
+import { analyzeAll, fusionText } from '@/api/nlpApi'
 import { TOOL_COLORS, TOOL_GROUPS } from '@/constants/designTokens'
 import { recordAnalysis } from '@/utils/analysisHistory'
+import { formatStrategy, statusDisplay } from '@/utils/researchSemantics'
 
 const inputText = ref('')
 const loading = ref(false)
 const error = ref('')
 const fusionResult = ref(null)
 const activeTools = ref([])
+const degradedTools = ref([])
+const excludedTools = ref([])
+const fusionMeta = ref({})
 const showTrace = ref({})
 const candidateFeatures = ['lemma', 'root', 'pos', 'segmentation']
 const lastDuration = ref(0)
 const analyzerEvidence = ref({})
+const runId = ref(0)
 
 const visibleToolColors = computed(() =>
   Object.fromEntries(Object.entries(TOOL_COLORS).filter(([tool]) => ['camel', 'sinatools', 'stanza', 'farasa', 'alkhalil', 'udpipe', 'qalsadi'].includes(tool))),
@@ -368,22 +401,6 @@ const DEPREL_AR = {
   advmod: 'Adverbial modifier',
   conj: 'Conjunct',
   cc: 'Coordinating conjunction',
-}
-
-const FEATURE_SOURCE_EXPLANATION = {
-  lemma: 'CAMeL Tools is often the strongest source for lexical normalization.',
-  root: 'CAMeL Tools provides root extraction signals.',
-  root_type: 'Root type classification is mostly provided by CAMeL metadata.',
-  gloss: 'CAMeL glosses provide a compact English meaning cue.',
-  pos: 'POS uses agreement-aware selection across analyzers.',
-  gender: 'CAMeL morphology provides gender evidence.',
-  number: 'CAMeL morphology provides number evidence.',
-  tense: 'CAMeL morphology provides tense evidence.',
-  case: 'Stanza and dependency-aware analyzers provide case evidence.',
-  definite: 'Stanza often supplies definiteness markers.',
-  voice: 'Voice is usually derived from morphology metadata.',
-  dependency: 'Stanza provides dependency evidence.',
-  segmentation: 'Farasa provides segmentation evidence.',
 }
 
 const activeToolCount = computed(() => activeTools.value.length)
@@ -482,33 +499,43 @@ const contributionGroups = computed(() => {
 
 async function runSmartAnalysis() {
   if (!inputText.value.trim()) return
+  const currentRunId = ++runId.value
   loading.value = true
   error.value = ''
   fusionResult.value = null
+  activeTools.value = []
+  degradedTools.value = []
+  excludedTools.value = []
+  fusionMeta.value = {}
   showTrace.value = {}
   lastDuration.value = 0
 
   try {
     const started = performance.now()
-    const [fusionResponse, combinedResponse] = await Promise.all([
-      axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } }),
-      axios.get(`${API_BASE_URL}/analyze-combined`, { params: { text: inputText.value } }).catch(() => ({ data: null })),
+    const [fusionPayload, combinedPayload] = await Promise.all([
+      fusionText(inputText.value),
+      analyzeAll(inputText.value).catch(() => null),
     ])
-    const data = fusionResponse.data
-    analyzerEvidence.value = combinedResponse.data?.tools || combinedResponse.data?.combined?.tools || combinedResponse.data?.combined || {}
+    if (currentRunId !== runId.value) return
+    const data = fusionPayload
+    const combinedSource = combinedPayload?.data || combinedPayload || {}
+    analyzerEvidence.value = combinedSource?.tools || combinedSource?.combined?.tools || combinedSource?.combined || {}
     lastDuration.value = Math.round(performance.now() - started)
     const normalized = normalizeFusionRows(data)
     fusionResult.value = normalized.rows
     activeTools.value = normalized.activeTools
+    degradedTools.value = normalized.degradedTools
+    excludedTools.value = normalized.excludedTools
+    fusionMeta.value = normalized.meta
     recordAnalysis({
       page: 'Fusion',
       text: inputText.value.trim(),
       summary: `${normalized.rows.length} tokens | ${totalConflicts.value} conflicts | ${averageConfidenceLabel.value} avg confidence`,
     })
   } catch (e) {
-    error.value = e?.response?.data?.detail || e?.message || 'Unable to reach the backend. Make sure FastAPI is running on localhost:8000.'
+    if (currentRunId === runId.value) error.value = e?.response?.data?.detail || e?.message || 'Unable to reach the backend. Make sure FastAPI is running on localhost:8000.'
   } finally {
-    loading.value = false
+    if (currentRunId === runId.value) loading.value = false
   }
 }
 
@@ -518,14 +545,16 @@ function runExample(example) {
 }
 
 function normalizeFusionRows(payload) {
-  const rows = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.fusion)
-      ? payload.fusion
-      : Array.isArray(payload?.fusion_result?.fusion)
-        ? payload.fusion_result.fusion
-        : Array.isArray(payload?.fusion_result)
-          ? payload.fusion_result
+  const source = payload?.data || payload || {}
+  const tools = source?.tools || {}
+  const rows = Array.isArray(source)
+    ? source
+    : Array.isArray(source?.fusion)
+      ? source.fusion
+      : Array.isArray(source?.fusion_result?.fusion)
+        ? source.fusion_result.fusion
+        : Array.isArray(source?.fusion_result)
+          ? source.fusion_result
           : []
 
   return {
@@ -545,12 +574,22 @@ function normalizeFusionRows(payload) {
         word: row?.word || row?.surface || row?.token || `#${index + 1}`,
         final,
         sources: row?.sources || legacyFinal.chosen_sources || {},
+        expert_decisions: row?.expert_decisions || {},
+        expert_summary: row?.expert_summary || {},
+        fusion_mode: row?.fusion_mode || '',
         conflicts: Array.isArray(row?.conflicts) ? row.conflicts : [],
         notes: Array.isArray(row?.notes) ? row.notes : [],
         decision_trace: Array.isArray(row?.decision_trace) ? row.decision_trace : [],
+        evidence: row?.evidence || {},
       }
     }),
-    activeTools: payload?.active_tools || payload?.meta?.active_tools || [],
+    activeTools: source?.active_tools || source?.meta?.active_tools || [],
+    degradedTools: source?.meta?.degraded_tools || Object.entries(tools).filter(([, item]) => {
+      const display = statusDisplay(item?.status)
+      return ['degraded', 'error', 'unavailable'].includes(display.group)
+    }).map(([tool]) => tool),
+    excludedTools: Object.entries(tools).filter(([, item]) => statusDisplay(item?.status).group === 'excluded').map(([tool]) => tool),
+    meta: source?.meta || {},
   }
 }
 
@@ -560,12 +599,7 @@ function toggleTrace(index) {
 
 function traceRows(token) {
   if (token.decision_trace.length) return token.decision_trace
-  return Object.entries(token.sources || {}).map(([feature, tool]) => ({
-    feature,
-    tool,
-    value: displayValue(token.final?.[feature]),
-    explanation: FEATURE_SOURCE_EXPLANATION[feature] || 'This value was selected from the strongest available source.',
-  }))
+  return []
 }
 
 const FUSION_ELIGIBILITY = {
@@ -576,6 +610,21 @@ const FUSION_ELIGIBILITY = {
 }
 
 function candidateEvidence(tokenIndex, feature) {
+  const token = fusionResult.value?.[tokenIndex]
+  const backendCandidates = token?.expert_decisions?.[feature]?.candidates
+  if (Array.isArray(backendCandidates) && backendCandidates.length) {
+    return backendCandidates.flatMap((candidate, index) => {
+      const tools = Array.isArray(candidate.tools) ? candidate.tools : []
+      const label = tools.join(' / ') || `candidate ${index + 1}`
+      return [{
+        tool: tools[0] || '',
+        label,
+        value: candidate.value,
+        score: candidate.score,
+      }]
+    })
+  }
+
   return (FUSION_ELIGIBILITY[feature] || []).flatMap((tool) => {
     const payload = analyzerEvidence.value?.[tool]
     const token = Array.isArray(payload?.tokens) ? payload.tokens[tokenIndex] : null
@@ -598,7 +647,7 @@ function candidateEvidence(tokenIndex, feature) {
 }
 
 function sourceFor(token, feature, fallback) {
-  return token.sources?.[feature] || fallback
+  return token.expert_decisions?.[feature]?.primary_source || token.sources?.[feature] || fallback
 }
 
 function hasValue(value) {
@@ -620,8 +669,26 @@ function dependencyLabel(dep) {
 }
 
 function displayValue(value) {
-  if (Array.isArray(value)) return value.length ? value.join(' + ') : 'Not recognized'
-  return hasValue(value) ? String(value) : 'Not recognized'
+  if (Array.isArray(value)) return value.length ? value.join(' + ') : 'Not returned'
+  if (value && typeof value === 'object') return JSON.stringify(value)
+  return hasValue(value) ? String(value) : 'Not returned'
+}
+
+function decisionFor(token, feature) {
+  return token?.expert_decisions?.[feature] || {}
+}
+
+function primarySourceLabel(token, feature) {
+  const source = sourceFor(token, feature, '')
+  return source ? `Primary source: ${source}` : 'Primary source not returned'
+}
+
+function traceValue(row) {
+  return displayValue(row.chosen_value ?? row.value)
+}
+
+function traceSource(row) {
+  return row.primary_source || row.source || row.tool || ''
 }
 
 function featureLabel(feature) {
@@ -802,6 +869,30 @@ function voiceLabel(value) {
   background: var(--c-page-bg);
 }
 
+.fusion-participation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.participation-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+
+.participation-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--c-text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .summary-item {
   display: grid;
   gap: 2px;
@@ -898,6 +989,12 @@ function voiceLabel(value) {
   color: var(--c-text-primary);
   font-size: 16px;
   font-weight: 500;
+}
+
+.source-line {
+  color: var(--c-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .root-value {
@@ -1419,6 +1516,16 @@ function voiceLabel(value) {
   color: var(--c-text-primary);
 }
 
+.candidate-score {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #d9e2ec;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .candidate-value.arabic {
   text-align: right;
   font-size: 14px;
@@ -1450,6 +1557,9 @@ function voiceLabel(value) {
 
 .trace-support {
   grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   padding-left: 0;
   line-height: 1.5;
 }
@@ -1513,6 +1623,7 @@ function voiceLabel(value) {
   }
 
   .fusion-method-grid,
+  .fusion-participation-grid,
   .features-grid,
   .candidate-feature-grid {
     grid-template-columns: 1fr;

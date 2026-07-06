@@ -1,215 +1,198 @@
 # Arabic NLP Platform Architecture Audit
 
-## Scope
+## Final Audit Scope
 
-This cleanup pass reorganizes project structure, removes generated/scaffold artifacts, standardizes API response formatting, and documents the current architecture. It does not add analyzers, change analyzer algorithms, change fusion rules, or implement supervisor feedback.
+This final pre-defense audit inspected the backend analyzer architecture, expert fusion, capability-aware evaluation, and Vue frontend research flow. It updates documentation only. No backend Python code, frontend Vue code, package files, routes, analyzer wrappers, fusion logic, or evaluation logic were modified.
+
+## Final Status Summary
+
+- Expert Fusion: implemented.
+- Capability-Aware Evaluation: implemented.
+- SinaTools: integrated as a lazy-loaded local lexical resource.
+- AraBERT: integrated as contextual transformer support only.
+- MADAMIRA: excluded for the defense configuration because licensed resources are missing.
+- Remaining risks: mostly demo stability, terminology precision, and future cleanup of duplicated backend namespaces.
 
 ## Architecture Diagram
 
 ```mermaid
 flowchart TD
     UI["Vue Frontend"] --> API["FastAPI Routes app/api"]
-    API --> Startup["Tool Registry + Startup app/core"]
-    Startup --> Adapters["Analyzer Adapters app/tools"]
+    API --> Registry["Tool Registry and Startup app/core"]
+    Registry --> Adapters["Analyzer Adapters app/tools and backend/analyzers"]
     API --> Normalize["Normalization backend/services/normalizer.py"]
-    API --> Align["Alignment backend/services/alignment_engine.py"]
-    API --> Compare["Comparison backend/services/comparison_service.py"]
-    API --> Fusion["Fusion app/services/fusion_service.py"]
-    API --> Eval["Evaluation app/services/eval_service.py"]
-    Normalize --> Schemas["Schemas backend/schemas"]
-    Align --> Compare
-    Compare --> Fusion
-    Fusion --> Confidence["Confidence backend/services/confidence_service.py"]
-    Fusion --> Suspicious["Suspicious Flags backend/services/suspicious_service.py"]
-    Adapters --> External["CAMeL, Farasa, Stanza, Qalsadi, UDPipe, AlKhalil, AraBERT, MADAMIRA"]
+    Normalize --> Align["Alignment backend/services/alignment_engine.py"]
+    Align --> Compare["Comparison backend/services/comparison_service.py"]
+    Compare --> Fusion["Expert Fusion app/services/fusion_service.py and expert_fusion_service.py"]
+    Fusion --> Eval["Capability-Aware Evaluation app/services/eval_service.py"]
+    Eval --> UI
+    Adapters --> Tools["CAMeL, Farasa, Stanza, Qalsadi, AlKhalil, UDPipe, SinaTools, AraBERT, MADAMIRA"]
 ```
 
-## Project Architecture Tree
+## Research Flow
 
 ```text
-arabic-nlp-platform/
-  main.py
-  app/
-    api/                FastAPI route modules
-    core/               startup, registry, cache orchestration
-    models/             API response helpers and response models
-    services/           active application services
-    tools/              analyzer adapters used by the app runtime
-    utils/              shared app constants, logging, helper functions
-  backend/
-    analyzers/          newer analyzer contracts and wrappers
-    config/             settings and external tool path metadata
-    schemas/            pydantic and typed response schemas
-    services/           domain services for alignment, normalization, comparison, confidence
-    utils/              backend text and compatibility utilities
-  frontend/
-    src/
-      api/              API client setup
-      assets/           global CSS only
-      components/
-        badges/         reusable status/source badges
-        charts/         reusable charts and matrices
-        tables/         reusable table cells
-      composables/      Vue composables
-      config/           frontend tool config
-      constants/        design and tool constants
-      router/           page routing
-      utils/            frontend data utilities
-      views/            dashboard, analysis, comparison, fusion, evaluation, reports
-  docs/
-    architecture_audit.md
+Input Arabic Text
+  -> Tool Outputs
+  -> Normalization and Alignment
+  -> Compare Agreement/Conflicts
+  -> Expert Fusion Decision
+  -> Capability-Aware Evaluation
+  -> Frontend Visualization
 ```
 
-## Folder Tree After Cleanup
+This is a comparative analysis platform. It does not claim ground-truth correctness.
+
+## Tool Integration Audit
+
+| Tool | Status | Main capability | Should not be used for | Current limitation | Defense explanation |
+| --- | --- | --- | --- | --- | --- |
+| CAMeL | Working | Morphology, lemma, root, POS, gloss | Sole ground-truth authority | Can disagree with UD-oriented tools because it is morphology-focused | Primary morphology expert and strong lexical baseline. |
+| Farasa | Working, segmentation-focused, may be slow | Segmentation and clitic boundaries | Lemma/root/POS correctness claims | Java startup and runtime can be slower; timeout/degraded runs must be excluded from scoring | Segmentation anchor; prewarm for demo. |
+| Stanza | Working | POS, lemma, dependency syntax | Root extraction or morphology-table authority | Tokenization/MWT alignment can differ | UD-oriented neural syntax/POS expert. |
+| Qalsadi | Working partial | Lemma/stem support | Full morphology/root/dependency analysis | Partial feature coverage | Lightweight rule-based lexical support, mainly for lemma agreement. |
+| AlKhalil | Working | Rule-based morphology, root, lemma, POS evidence | Raw POS conflict display without normalization | Label format can inflate false conflicts if not canonicalized | Rule-based morphological/root evidence source. |
+| UDPipe | Working | POS and dependency syntax | Arabic root/morphology authority | UD tokenization and dependency conventions differ from other tools | Independent UD syntax/POS expert. |
+| SinaTools | Working lazy-loaded local resource | Lemma, root, POS lexical evidence | Automatic always-on analyzer or gold-standard POS | Requires local resource preload; lexical POS can disagree with contextual tools | Heavy local lexical resource used only when loaded and comparable. |
+| AraBERT | Working contextual support only | Contextual transformer evidence | Direct lemma, root, POS, segmentation, or dependency analyzer | Base model lacks task-specific heads for morphology outputs | Contextual support; null morphology fields are expected and should be explained. |
+| MADAMIRA | Excluded, missing licensed resources | Morphology if licensed resources are present | Current working analyzer claim | Required licensed resources are not present | Excluded from defense scoring and fusion in current configuration. |
+
+## Expert Fusion Audit
+
+Expert Fusion is implemented through feature-specific expert decisions. The backend applies capability-weighted consensus rather than blind majority voting or a single global priority list.
+
+Verified fusion evidence includes:
+
+- POS expert.
+- Lemma expert.
+- Root expert.
+- Segmentation expert.
+- Dependency expert.
+- Morphology expert.
+- Source voting and weighted consensus.
+- Supporting tools and disagreeing tools.
+- Confidence score and confidence level.
+- Decision trace for each token.
+- Functional-word root deemphasis.
+- Segmentation-style disagreement notes.
+
+Why this is stronger than simple priority fusion:
+
+- Different analyzers specialize in different linguistic features.
+- Feature-specific weights avoid treating AraBERT, Farasa, Stanza, CAMeL, and AlKhalil as interchangeable.
+- The final output is auditable because selected values retain sources, candidate evidence, conflicts, and confidence.
+
+Remaining limitations:
+
+- Confidence is an evidence-summary score, not a calibrated probability.
+- Fusion quality still depends on alignment quality.
+- Segmentation disagreements may reflect representation style rather than true linguistic error.
+- Lexical-resource outputs, especially SinaTools POS, can disagree with UD/contextual tools.
+
+## Capability-Aware Evaluation Audit
+
+Capability-Aware Evaluation is implemented in `app/services/eval_service.py`.
+
+Verified evaluation behavior includes:
+
+- Unsupported tools are not counted as wrong.
+- Lazy, excluded, unavailable, loading, timeout, missing-resource, and skipped-low-memory statuses are excluded from scoring.
+- Metrics are computed per supported capability.
+- The response includes active tools, excluded tools, capability contributors, metric contributors, alignment metadata, evaluated token counts, and a metrics note.
+- Farasa timeout/degraded behavior is documented and excluded from segmentation scoring for degraded runs.
+- AraBERT is separated as contextual evidence and excluded from morphology metrics.
+- MADAMIRA is excluded.
+
+Metric interpretation:
+
+- POS agreement: normalized agreement across POS-capable tools.
+- Lemma match: agreement among lemma-capable tools after normalization.
+- Root agreement: normalized agreement among root-capable tools.
+- Segmentation coverage: availability of segmentation evidence, not correctness.
+- Capability contributors: tools eligible and available for each feature.
+- Metric contributors: tools actually considered for each reported metric.
+- Excluded tools: visible but not penalized.
+
+## Frontend UX Audit
+
+The frontend supports a clear research story:
 
 ```text
-frontend/src/components/
-  badges/
-    ConfidenceBadge.vue
-    ToolBadge.vue
-  charts/
-    HeatmapMatrix.vue
-    ScientificChart.vue
-  tables/
-    EmptyCell.vue
+Input Arabic Text -> Tool Outputs -> Compare Agreement/Conflicts -> Expert Fusion Decision -> Capability-Aware Evaluation
 ```
 
-```text
-app/api/
-  analyze.py
-  compare.py
-  evaluate.py
-  fusion.py
-  ui.py
+Observed strengths:
 
-app/models/
-  api_response.py
-  response_models.py
-```
+- Home/Dashboard introduces analyzer evidence, capability-aware comparison, expert fusion, and evaluation.
+- Analyze presents individual and combined analyzer outputs while preserving missing fields.
+- Compare presents aligned evidence and feature-level conflicts.
+- SmartAnalysis/Smart Fusion shows selected sources, supporting evidence, confidence, conflicts, and decision trace.
+- Evaluate presents capability-aware metrics, excluded/unavailable tools, contributors, and a methodology note.
+- About explains that consensus is not treated as ground truth.
 
-## Dependency Graph
+Status handling is mostly defensible. The UI accounts for:
 
-```text
-main.py
-  -> app.api.*
-  -> app.core.tool_registry
-  -> app.tools.* loaders
+- `ok`
+- `lazy` / lazy-loaded heavy tools
+- `lazy_not_loaded`
+- `loading`
+- `excluded`
+- `unavailable`
+- missing-resource style statuses
 
-app.api.analyze
-  -> app.core.startup
-  -> app.core.tool_registry
-  -> app.models.api_response
-  -> backend.schemas.unified_schema
+Frontend recommendations before defense:
 
-app.api.compare
-  -> app.core.startup
-  -> backend.services.normalizer
-  -> backend.services.alignment_engine
-  -> backend.services.comparison_service
-  -> app.models.api_response
+- Treat "No data available" as a neutral unavailable/unsupported state, not as analyzer failure.
+- Display AraBERT missing morphology as "Contextual support only."
+- Display MADAMIRA as "Excluded: missing licensed resources."
+- Display SinaTools as "Lazy-loaded local resource" until preloaded.
+- Keep warning colors for real conflicts, errors, or degraded tool states; avoid warning colors for normal unsupported features.
 
-app.api.fusion
-  -> app.core.startup
-  -> app.services.fusion_service
-  -> app.models.api_response
+## Known Backend Limitations
 
-app.api.evaluate
-  -> app.core.startup
-  -> app.services.eval_service
-  -> app.services.fusion_service
-  -> app.models.api_response
+- AraBERT does not provide lemma, root, or POS without a fine-tuned head.
+- SinaTools can disagree on POS because it is lexical/resource-based.
+- Farasa can be slower and should be prewarmed for a live demo.
+- MADAMIRA requires licensed resources and remains excluded.
+- Stanza and UDPipe alignment can differ due to tokenization and multi-word-token handling.
+- Segmentation disagreement often reflects clitic segmentation style rather than analyzer failure.
 
-frontend views
-  -> frontend/src/components/badges
-  -> frontend/src/components/charts
-  -> frontend/src/components/tables
-  -> backend API endpoints
-```
+## Risk Classification
 
-## Analyzer Isolation Contract
+### Critical Before Defense
 
-Each analyzer remains isolated behind its adapter module. The required analyzer boundary is:
+No source-code critical blockers were identified during this documentation-only audit, assuming the demo machine has the same working dependencies and resources that the current implementation expects.
 
-- Input: plain Arabic text string from route/service layer.
-- Output: tool response with `tool`, `status`, `input`, `word_count`, and `tokens`.
-- Configuration: environment/tool paths under `backend/config` or adapter-local lazy loaders.
-- Error handling: adapter returns unavailable/error payloads instead of crashing route handlers.
-- Documentation: analyzer-specific notes belong near adapter modules or `backend/analyzers/README_unified_tools.md`.
+### Should Fix If Time Allows
 
-## Fusion Layer Structure
+- Refine frontend empty-state wording so unsupported, unavailable, lazy, and contextual-only states are visually and textually distinct.
+- Prewarm Farasa and any Java-backed tools before the defense demo.
+- Preload SinaTools only for demo paths that need its lexical evidence.
+- Add route-level smoke tests for `/analyze-combined`, `/compare`, `/fusion`, `/evaluate`, and `/tools/status`.
 
-Current responsibilities are separated as:
+### Acceptable Limitations
 
-- Alignment: `backend/services/alignment_engine.py`
-- Normalization: `backend/services/normalizer.py`
-- Confidence: `backend/services/confidence_service.py`
-- Conflict resolution/comparison: `backend/services/comparison_service.py`
-- Final output: `app/services/fusion_service.py` and route envelopes in `app/api/fusion.py`
+- No gold-standard corpus evaluation is performed.
+- Agreement metrics are not supervised accuracy.
+- AraBERT is contextual support only.
+- MADAMIRA is excluded.
+- Tool disagreements are expected in Arabic NLP because analyzers differ in tokenization, POS tagsets, morphology assumptions, and clitic segmentation conventions.
 
-## API Response Standard
+### Future Work
 
-All non-streaming JSON route responses now use:
+- Consolidate duplicated `app/` and `backend/` analyzer/service boundaries after defense.
+- Add persistent benchmark fixtures with expected schema-level outputs.
+- Add a gold-standard evaluation mode if a licensed or open annotated corpus is legally available.
+- Add clearer frontend state components for unsupported vs unavailable vs lazy vs excluded evidence.
 
-```json
-{
-  "status": "success",
-  "message": "Human readable result",
-  "data": {},
-  "metadata": {},
-  "errors": []
-}
-```
+## Defense Readiness
 
-Legacy top-level fields such as `tools`, `fusion`, `comparison`, and `evaluation` are preserved for the existing frontend.
+Research readiness is strong if claims remain conservative:
 
-## Files Removed
+- Present the project as comparative, agreement-based, and capability-aware.
+- Do not claim gold-standard accuracy.
+- Do not claim AraBERT performs direct morphology.
+- Do not claim MADAMIRA is operational without licensed resources.
+- Do not treat lazy/unavailable tools as wrong outputs.
 
-- Python bytecode/cache artifacts: tracked `*.pyc` files and `__pycache__/` folders under project source.
-- Vue scaffold files:
-  - `frontend/src/components/HelloWorld.vue`
-  - `frontend/src/components/TheWelcome.vue`
-  - `frontend/src/components/WelcomeItem.vue`
-  - `frontend/src/components/icons/*`
-- Unused frontend assets:
-  - `frontend/src/assets/base.css`
-  - `frontend/src/assets/logo.svg`
-
-Pre-existing deletion preserved:
-
-- `app/services/_repair3_camel_root_patch_notes.txt`
-
-## Files Renamed Or Moved
-
-- `frontend/src/components/ConfidenceBadge.vue` -> `frontend/src/components/badges/ConfidenceBadge.vue`
-- `frontend/src/components/ToolBadge.vue` -> `frontend/src/components/badges/ToolBadge.vue`
-- `frontend/src/components/ScientificChart.vue` -> `frontend/src/components/charts/ScientificChart.vue`
-- `frontend/src/components/HeatmapMatrix.vue` -> `frontend/src/components/charts/HeatmapMatrix.vue`
-- `frontend/src/components/EmptyCell.vue` -> `frontend/src/components/tables/EmptyCell.vue`
-
-## Files Added
-
-- `app/models/api_response.py`
-- `docs/architecture_audit.md`
-
-## Files Merged
-
-- Repeated route-level envelope dumping was merged into `app/models/api_response.py`.
-
-## Refactoring Summary
-
-- Standardized JSON API responses across active route modules.
-- Removed generated bytecode from source control.
-- Removed unused Vue starter components and unused starter assets.
-- Grouped frontend reusable components by responsibility.
-- Preserved active UI screens and all existing analyzer/fusion algorithms.
-- Documented current backend/frontend module boundaries and dependency flow.
-
-## Database Normalization
-
-No application database schema was found in the audited source tree. Current persisted data appears to be file-based fixtures/exports and external analyzer resources. Database normalization is therefore not applicable in this cleanup pass.
-
-## Follow-up Cleanup Candidates
-
-- Consolidate the dual backend namespaces (`app` and `backend`) in a future migration after tests are added.
-- Decide whether legacy/simple analyzer wrappers under `backend/analyzers` are still needed by future supervisor feedback.
-- Add route-level tests for the standardized response shape before removing legacy top-level fields.
+Final readiness assessment: 8.5/10.

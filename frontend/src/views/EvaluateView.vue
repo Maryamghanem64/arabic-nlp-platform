@@ -9,6 +9,9 @@
           denominators, and every score is interpreted as consistency between tools rather than correctness.
         </p>
         <p class="page-note">No AI-generated interpretation is used. Metrics are derived directly from analyzer outputs.</p>
+        <p class="page-note">
+          Metrics measure agreement or evidence coverage among comparable analyzer outputs. They do not represent gold-standard linguistic accuracy.
+        </p>
       </div>
     </section>
 
@@ -140,6 +143,14 @@
               <span v-if="!excludedTools.length" class="null-value">None reported</span>
             </div>
           </article>
+
+          <article class="report-card">
+            <span class="report-label">Degraded runtime notes</span>
+            <div class="excluded-list">
+              <span v-for="note in degradedNotes" :key="note">{{ note }}</span>
+              <span v-if="!degradedNotes.length" class="null-value">None reported</span>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -149,8 +160,32 @@
           <strong class="kpi-value" :class="getScoreClass(metric.value)">
             {{ percentLabel(metric.value, metric.digits) }}
           </strong>
+          <span class="evaluated-count">Evaluated tokens: {{ metric.count ?? 0 }}</span>
+          <div class="metric-tool-block">
+            <span>Metric contributors</span>
+            <div class="tool-row compact-tool-row">
+              <ToolBadge v-for="tool in metric.contributors" :key="`${metric.key}-metric-${tool}`" :tool="tool" />
+              <span v-if="!metric.contributors.length" class="null-value">No comparable values returned.</span>
+            </div>
+          </div>
+          <div class="metric-tool-block">
+            <span>Capability contributors</span>
+            <div class="tool-row compact-tool-row">
+              <ToolBadge v-for="tool in metric.capability" :key="`${metric.key}-cap-${tool}`" :tool="tool" />
+              <span v-if="!metric.capability.length" class="null-value">No capable active tools reported.</span>
+            </div>
+          </div>
           <p class="kpi-note">{{ metric.note }}</p>
         </article>
+      </section>
+
+      <section class="panel panel-pad contributor-panel">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Contributor distinction</h2>
+            <p class="section-subtitle">Capability contributors are tools that can support a feature. Metric contributors are tools that returned comparable values in this run.</p>
+          </div>
+        </div>
       </section>
 
       <ScientificChart
@@ -179,18 +214,18 @@
 
         <div class="report-grid">
           <article class="report-card">
-            <span class="report-label">Reported POS disagreements</span>
+            <span class="report-label">Observed disagreements</span>
 
             <div class="conflict-mini-grid">
-              <div v-for="(conflict, index) in posConflicts" :key="index" class="conflict-card">
+              <div v-for="(conflict, index) in allConflicts" :key="index" class="conflict-card">
                 <strong class="arabic-value" dir="rtl" lang="ar">
                   {{ conflict.word || conflict.token || `#${index + 1}` }}
                 </strong>
-                <span class="disagreement-badge">{{ conflict.feature || 'POS' }}</span>
+                <span class="disagreement-badge">{{ conflict.feature || 'feature' }}</span>
                 <span class="conflict-text">{{ conflictText(conflict) }}</span>
               </div>
 
-              <span v-if="!posConflicts.length" class="null-value">No POS disagreements were reported.</span>
+              <span v-if="!allConflicts.length" class="null-value">No observed disagreements were reported.</span>
             </div>
           </article>
 
@@ -214,11 +249,11 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import axios from 'axios'
 import ToolBadge from '@/components/badges/ToolBadge.vue'
 import ScientificChart from '@/components/charts/ScientificChart.vue'
-import { API_BASE_URL } from '@/api/nlpApi'
+import { evaluateText } from '@/api/nlpApi'
 import { recordAnalysis } from '@/utils/analysisHistory'
+import { formatToolList } from '@/utils/researchSemantics'
 
 const inputText = ref('')
 const loading = ref(false)
@@ -226,9 +261,15 @@ const error = ref('')
 const evalResult = ref(null)
 const activeTools = ref([])
 const excludedTools = ref([])
+const degradedNotes = ref([])
+const capabilityContributors = ref({})
+const metricContributors = ref({})
+const evaluatedTokenCounts = ref({})
+const allConflicts = ref([])
 const posConflicts = ref([])
 const rawNote = ref('')
 const requestDuration = ref(0)
+const runId = ref(0)
 
 const EXAMPLE_SENTENCES = [
   'قرأ الطالب الكتب في المكتبة',
@@ -342,36 +383,48 @@ const capabilityMatrix = [
 const metricCards = computed(() => [
   {
     key: 'pos',
-    label: 'POS agreement',
+    label: 'POS Agreement',
     value: evalResult.value?.pos_agreement,
     digits: 1,
-    note: 'Only eligible POS analyzers are included.',
+    count: evaluatedTokenCounts.value.pos,
+    contributors: metricContributors.value.pos || [],
+    capability: capabilityContributors.value.pos || [],
+    note: 'Agreement among comparable POS values returned in this run.',
   },
   {
-    key: 'lemma_norm',
-    label: 'Normalized lemma match',
-    value: evalResult.value?.lemma_normalized_match,
+    key: 'lemma',
+    label: 'Lemma Match',
+    value: evalResult.value?.lemma_match,
     digits: 1,
-    note: 'Orthographic normalization applied before matching.',
+    count: evaluatedTokenCounts.value.lemma,
+    contributors: metricContributors.value.lemma || [],
+    capability: capabilityContributors.value.lemma || [],
+    note: 'Match among comparable lemma evidence after backend normalization.',
   },
   {
-    key: 'lemma_exact',
-    label: 'Exact lemma match',
-    value: evalResult.value?.lemma_exact_match,
+    key: 'root',
+    label: 'Root Agreement',
+    value: evalResult.value?.root_agreement,
     digits: 1,
-    note: 'Strict token-level equality, convention-sensitive.',
+    count: evaluatedTokenCounts.value.root,
+    contributors: metricContributors.value.root || [],
+    capability: capabilityContributors.value.root || [],
+    note: 'Root scoring excludes tokens where root comparison is not linguistically meaningful.',
   },
   {
-    key: 'seg',
-    label: 'Segmentation coverage',
+    key: 'segmentation',
+    label: 'Segmentation Coverage',
     value: evalResult.value?.segmentation_coverage,
     digits: 0,
-    note: 'Availability of segmentation evidence.',
+    count: evaluatedTokenCounts.value.segmentation,
+    contributors: metricContributors.value.segmentation || [],
+    capability: capabilityContributors.value.segmentation || [],
+    note: 'Coverage of returned segmentation evidence among capable tools.',
   },
 ])
 
 const observedMetrics = computed(() => ({
-  labels: ['POS agreement', 'Normalized lemma', 'Exact lemma', 'Segmentation coverage'],
+  labels: metricCards.value.map((metric) => metric.label),
   datasets: [
     {
       label: 'Observed %',
@@ -384,43 +437,49 @@ const observedMetrics = computed(() => ({
 async function runEvaluation() {
   if (!inputText.value.trim()) return
 
+  const currentRunId = ++runId.value
   loading.value = true
   error.value = ''
   evalResult.value = null
   activeTools.value = []
   excludedTools.value = []
+  degradedNotes.value = []
+  capabilityContributors.value = {}
+  metricContributors.value = {}
+  evaluatedTokenCounts.value = {}
+  allConflicts.value = []
   posConflicts.value = []
   rawNote.value = ''
   requestDuration.value = 0
 
   try {
     const started = performance.now()
-    const { data } = await axios.get(`${API_BASE_URL}/evaluate`, {
-      params: { text: inputText.value },
-    })
+    const data = await evaluateText(inputText.value)
+    if (currentRunId !== runId.value) return
     requestDuration.value = Math.round(performance.now() - started)
 
-    const raw = data?.evaluation || data
+    const source = data?.data || data
+    const raw = source?.evaluation || source
 
     evalResult.value = {
       pos_agreement: toScalar(raw.pos_agreement ?? raw.pos_agreement_pct),
-      lemma_normalized_match: toScalar(
+      lemma_match: toScalar(
         raw.lemma_normalized_match ??
           raw.lemma_normalized_match_pct ??
           raw.lemma_match ??
           raw.lemma_match_pct,
       ),
-      lemma_exact_match: toScalar(
-        raw.lemma_exact_match ??
-          raw.lemma_exact_match_pct ??
-          raw.lemma_match ??
-          raw.lemma_match_pct,
-      ),
+      root_agreement: toScalar(raw.root_agreement ?? raw.root_agreement_pct),
       segmentation_coverage: toScalar(raw.segmentation_coverage),
     }
 
-    activeTools.value = normalizeToolList(raw.active_tools || data.active_tools || [])
-    excludedTools.value = normalizeToolList(raw.excluded_tools || data.excluded_tools || [])
+    activeTools.value = normalizeToolList(raw.active_tools || source.active_tools || [])
+    excludedTools.value = normalizeToolList(raw.excluded_tools || source.excluded_tools || [])
+    degradedNotes.value = normalizeToolList(raw.degraded_notes || [])
+    capabilityContributors.value = normalizeContributorMap(raw.capability_contributors)
+    metricContributors.value = normalizeContributorMap(raw.metric_contributors)
+    evaluatedTokenCounts.value = raw.evaluated_token_counts || {}
+    allConflicts.value = Array.isArray(raw.all_conflicts) ? raw.all_conflicts : []
     posConflicts.value = Array.isArray(raw.pos_conflicts)
       ? raw.pos_conflicts
       : Array.isArray(raw.all_conflicts)
@@ -434,13 +493,14 @@ async function runEvaluation() {
       summary: `${toPercent(evalResult.value.pos_agreement)}% POS agreement | capability-aware`,
     })
   } catch (e) {
+    if (currentRunId !== runId.value) return
     error.value =
       e?.response?.data?.detail ||
       e?.response?.data?.error ||
       e?.message ||
       'Unable to connect to the evaluation service.'
   } finally {
-    loading.value = false
+    if (currentRunId === runId.value) loading.value = false
   }
 }
 
@@ -450,15 +510,14 @@ function runExample(example) {
 }
 
 function normalizeToolList(value) {
-  if (!value) return []
-  if (Array.isArray(value)) return value.filter(Boolean)
-  if (typeof value === 'string') {
-    return value
-      .split(/[,\s/]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  }
-  return []
+  return formatToolList(value)
+}
+
+function normalizeContributorMap(value) {
+  if (!value || typeof value !== 'object') return {}
+  return Object.fromEntries(
+    Object.entries(value).map(([feature, tools]) => [feature, normalizeToolList(tools)]),
+  )
 }
 
 function capabilityClass(value) {
@@ -494,6 +553,15 @@ function getScoreClass(score) {
 }
 
 function conflictText(conflict) {
+  if (conflict?.tool_a || conflict?.tool_b) {
+    const toolA = conflict.tool_a || 'Tool A'
+    const toolB = conflict.tool_b || 'Tool B'
+    const valueA = conflict.value_a ?? conflict.tool_a_value ?? conflict.raw_value_a ?? 'not returned'
+    const valueB = conflict.value_b ?? conflict.tool_b_value ?? conflict.raw_value_b ?? 'not returned'
+    const severity = conflict.severity ? ` / Severity: ${conflict.severity}` : ''
+    return `${toolA}: ${valueA} / ${toolB}: ${valueB}${severity}`
+  }
+
   if (conflict?.camel !== undefined || conflict?.stanza !== undefined) {
     return `CAMeL: ${conflict.camel ?? 'N/A'} / Stanza: ${conflict.stanza ?? 'N/A'}`
   }
@@ -787,7 +855,7 @@ function conflictText(conflict) {
 
 .metrics-section {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -830,6 +898,34 @@ function conflictText(conflict) {
   color: var(--c-text-secondary);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.evaluated-count {
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.metric-tool-block {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.metric-tool-block > span {
+  color: var(--c-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.compact-tool-row {
+  margin-top: 0;
+}
+
+.contributor-panel {
+  border-left: 3px solid var(--c-accent);
 }
 
 .conflict-mini-grid {

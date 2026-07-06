@@ -18,7 +18,7 @@
       <div class="hero-panel">
         <article class="hero-stat hero-stat--accent">
           <strong>{{ dashboardMetrics.activeTools }}</strong>
-          <span>Available analyzers</span>
+          <span>Available tools</span>
         </article>
         <article class="hero-stat">
           <strong>{{ dashboardMetrics.tasks }}</strong>
@@ -154,14 +154,14 @@
         <div class="section-head">
           <div>
             <h2 class="section-title">Platform Capabilities</h2>
-            <p class="section-subtitle">The pages are shaped around actual research workflows.</p>
+            <p class="section-subtitle">The workflow follows analyzer evidence, comparison, expert fusion, and capability-aware evaluation.</p>
           </div>
         </div>
 
-        <div class="capability-grid">
-          <article v-for="item in capabilities" :key="item.label" class="capability-card">
-            <span class="capability-label">{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
+        <div class="workflow-grid">
+          <article v-for="item in workflowItems" :key="item.title" class="capability-card">
+            <span class="capability-label">{{ item.step }}</span>
+            <strong>{{ item.title }}</strong>
             <p>{{ item.note }}</p>
           </article>
         </div>
@@ -222,7 +222,7 @@
           <article
             v-for="tool in toolCards"
             :key="tool.key"
-            :class="['service-card', { unavailable: tool.status !== 'ok' && tool.status !== 'partial' && tool.status !== 'lazy' }]"
+            :class="['service-card', { unavailable: !isReadyStatus(tool.status) }]"
           >
             <div class="service-card-head">
               <span class="tool-code">{{ tool.code }}</span>
@@ -318,10 +318,23 @@ import { useToolStatus } from '@/composables/useToolStatus'
 import { TOOL_GROUPS } from '@/constants/designTokens'
 import ScientificChart from '@/components/charts/ScientificChart.vue'
 import { readAnalysisHistory } from '@/utils/analysisHistory'
+import { statusDisplay, toolRole } from '@/utils/researchSemantics'
 
-const { toolStatuses, activeTools, loading: statusLoading, error: statusError, refresh } = useToolStatus()
+const {
+  toolStatuses,
+  activeTools,
+  partialTools,
+  lazyTools,
+  loadingTools,
+  excludedTools,
+  unavailableTools,
+  errorTools,
+  loading: statusLoading,
+  error: statusError,
+  refresh,
+} = useToolStatus()
 const DASHBOARD_EXCLUDED_TOOLS = new Set(['madamira'])
-const DASHBOARD_READY_STATUSES = new Set(['ok', 'partial', 'lazy', 'loading'])
+const DASHBOARD_READY_STATUSES = new Set(['ok', 'loaded'])
 const DASHBOARD_CORE_TOOLS = ['camel', 'farasa', 'qalsadi', 'alkhalil', 'udpipe']
 const DASHBOARD_HEAVY_TOOLS = new Set(['stanza', 'arabert', 'sinatools'])
 
@@ -357,7 +370,7 @@ const toolCards = computed(() =>
 )
 
 const activeToolCount = computed(() => activeTools.value.length)
-const totalTools = computed(() => TOOL_KEYS.filter((tool) => !DASHBOARD_EXCLUDED_TOOLS.has(tool)).length)
+const totalTools = computed(() => TOOL_KEYS.length)
 const supportedTasks = computed(() => {
   const tasks = new Set()
   TOOL_KEYS.forEach((key) => {
@@ -369,7 +382,7 @@ const supportedTasks = computed(() => {
 const groupHealth = computed(() =>
   Object.entries(TOOL_GROUPS).map(([key, tools]) => {
     const includedTools = tools.filter((tool) => !DASHBOARD_EXCLUDED_TOOLS.has(tool))
-    const active = includedTools.filter((tool) => DASHBOARD_READY_STATUSES.has(toolStatuses.value[tool]?.status)).length
+    const active = includedTools.filter((tool) => statusDisplay(toolStatuses.value[tool]?.status).group === 'available').length
     const total = includedTools.length
     const ratio = total ? Math.round((active / total) * 100) : 0
     const label = key === 'morphology' ? 'Morphology' : key === 'syntax' ? 'Syntax' : 'Segmentation'
@@ -399,40 +412,40 @@ const readinessBars = computed(() => [
 
 const metrics = computed(() => [
   {
-    label: 'Available analyzers',
+    label: 'Research tools available',
     value: String(activeToolCount.value),
-    note: `${activeToolCount.value} online, ${totalTools.value - activeToolCount.value} offline or partial.`,
+    note: 'Tools with available runtime evidence.',
     className: 'score-high',
   },
   {
-    label: 'NLP tasks',
-    value: String(supportedTasks.value),
-    note: 'Unique tasks exposed across the integrated analyzers.',
+    label: 'Partial evidence',
+    value: String(partialTools.value.length),
+    note: 'Tools that returned partial capability evidence.',
     className: 'score-medium',
   },
   {
-    label: 'Core readiness',
-    value: evaluationSample.value.agreement,
-    note: 'Share of configured core analyzers in a ready state.',
-    className: scoreClass(evaluationSampleMetrics.value.agreement),
-  },
-  {
-    label: 'Tool availability',
-    value: evaluationSample.value.confidence,
-    note: 'Share of registered analyzers currently available.',
-    className: scoreClass(evaluationSampleMetrics.value.confidence),
-  },
-  {
-    label: 'Response time',
-    value: evaluationSample.value.responseTime,
-    note: 'Round trip for the dashboard health endpoint.',
+    label: 'Lazy resources',
+    value: String(lazyTools.value.length),
+    note: 'Lazy local resources are not counted as active.',
     className: 'score-medium',
   },
   {
-    label: 'Operational state',
-    value: evaluationSample.value.status,
-    note: 'Combines backend availability and tool readiness.',
-    className: evaluationSample.value.statusClass,
+    label: 'Loading resources',
+    value: String(loadingTools.value.length),
+    note: 'Local resources currently loading, if any.',
+    className: 'score-medium',
+  },
+  {
+    label: 'Excluded tools',
+    value: String(excludedTools.value.length),
+    note: 'Excluded by configuration or licensing; not an error.',
+    className: 'score-medium',
+  },
+  {
+    label: 'Unavailable / errors',
+    value: String(unavailableTools.value.length + errorTools.value.length),
+    note: 'Unavailable dependencies, models, runtime errors, or timeouts.',
+    className: unavailableTools.value.length || errorTools.value.length ? 'score-low' : 'score-high',
   },
 ])
 
@@ -444,6 +457,13 @@ const capabilities = computed(() => [
   { label: 'Average latency', value: evaluationSample.value.responseTime, note: 'Useful for presenting deployment readiness to reviewers.' },
   { label: 'Corpus sets', value: String(corpora.value.length), note: 'Workspace datasets and exported experiment files.' },
 ])
+
+const workflowItems = [
+  { step: '1. Analyze', title: 'Inspect individual analyzer evidence', note: 'Review what each tool actually returned for the Arabic input.' },
+  { step: '2. Compare', title: 'Observe agreement and disagreement', note: 'Inspect normalized evidence without treating disagreement as failure.' },
+  { step: '3. Expert Fusion', title: 'Audit feature-specific weighted decisions', note: 'See selected values, sources, candidates, and ambiguity signals.' },
+  { step: '4. Evaluate', title: 'Measure capability-aware agreement', note: 'Report comparable agreement and coverage, not gold-standard accuracy.' },
+]
 
 const corpora = ref([
   { name: 'evaluate_dataset.json', description: 'Evaluation samples used by the project evaluation workflow.' },
@@ -475,17 +495,16 @@ async function runEvaluationSample() {
     const finished = performance.now()
     const rawTools = healthResult?.tools || healthResult?.data?.tools || {}
     const toolEntries = TOOL_KEYS.map((key) => [key, normalizeDashboardStatus(key, rawTools[key] || toolStatuses.value[key])])
-    const registeredTools = toolEntries.filter(([key, status]) => !DASHBOARD_EXCLUDED_TOOLS.has(key) && status !== 'unknown')
+    const registeredTools = toolEntries.filter(([, status]) => status !== 'unknown')
     const readyTools = registeredTools.filter(([, status]) => DASHBOARD_READY_STATUSES.has(status))
     const coreStatuses = DASHBOARD_CORE_TOOLS.map((key) => normalizeDashboardStatus(key, rawTools[key] || toolStatuses.value[key]))
     const coreReady = coreStatuses.filter((status) => DASHBOARD_READY_STATUSES.has(status)).length
-    const heavyLazy = toolEntries.filter(([key, status]) => DASHBOARD_HEAVY_TOOLS.has(key) && ['lazy', 'loading'].includes(status)).length
-    const excluded = toolEntries.filter(([, status]) => status === 'excluded').length
-    const degraded = registeredTools.filter(([, status]) => !DASHBOARD_READY_STATUSES.has(status)).length
+    const heavyLazy = toolEntries.filter(([key, status]) => DASHBOARD_HEAVY_TOOLS.has(key) && ['lazy', 'lazy_not_loaded', 'loading'].includes(status)).length
+    const runtimeIssues = registeredTools.filter(([, status]) => ['error', 'timeout', 'unavailable', 'missing_dependency', 'missing_model', 'missing_java', 'missing_resources'].includes(status)).length
 
     const agreementScore = coreStatuses.length ? coreReady / coreStatuses.length : 0
     const confidenceScore = registeredTools.length ? readyTools.length / registeredTools.length : 0
-    const healthDegraded = excluded > 0 || degraded > 0
+    const healthDegraded = runtimeIssues > 0
 
     evaluationSampleMetrics.value = {
       agreement: agreementScore,
@@ -534,38 +553,28 @@ function scoreClass(value) {
 }
 
 function readableStatus(status) {
-  if (status === 'ok') return 'Online'
-  if (status === 'partial') return 'Partial'
-  if (status === 'lazy') return 'On demand'
-  if (status === 'loading') return 'Loading'
-  if (status === 'excluded') return 'Excluded'
-  if (status === 'future_work') return 'Planned'
-  if (status === 'missing_dependency') return 'Missing dependency'
-  if (status === 'missing_model') return 'Missing model'
-  if (status === 'missing_java') return 'Missing Java'
-  if (status === 'unavailable') return 'Unavailable'
-  return 'Offline'
+  return statusDisplay(status).label
 }
 
 function statusPill(status) {
-  if (status === 'ok') return 'pill-green'
-  if (status === 'partial' || status === 'lazy' || status === 'loading') return 'pill-amber'
-  if (status === 'excluded') return 'pill-gray'
-  if (status === 'future_work' || String(status).startsWith('missing') || status === 'unavailable') return 'pill-gray'
-  return 'pill-red'
+  return statusDisplay(status).className
+}
+
+function isReadyStatus(status) {
+  return ['available', 'partial'].includes(statusDisplay(status).group)
 }
 
 function describeTool(key) {
   const descriptions = {
-    camel: 'Morphology, lemma, root, and lexical confidence evidence.',
-    farasa: 'Segmentation and clitic-aware token handling.',
-    stanza: 'POS, lemma, case, and dependency parsing.',
-    qalsadi: 'Lightweight rule-based lemma and stem signals.',
-    arabert: 'Transformer-based contextual analysis experiments.',
-    alkhalil: 'Rule-based morphology and root extraction.',
-    udpipe: 'Universal Dependencies syntax and lemma output.',
-    madamira: 'Classical Arabic morphological analysis pipeline.',
-    sinatools: 'Experimental lemmatization and word-sense services.',
+    camel: toolRole('camel'),
+    farasa: toolRole('farasa'),
+    stanza: toolRole('stanza'),
+    qalsadi: toolRole('qalsadi'),
+    arabert: toolRole('arabert'),
+    alkhalil: toolRole('alkhalil'),
+    udpipe: toolRole('udpipe'),
+    madamira: 'Licensed morphological analyzer - excluded when resources are missing.',
+    sinatools: 'Local lexical resource - lazy-loaded and not auto-started.',
   }
   return descriptions[key] || 'Integrated NLP service.'
 }
@@ -610,24 +619,27 @@ const dashboardMetrics = computed(() => ({
 }))
 
 const healthSummary = computed(() => {
-  const lazyCount = TOOL_KEYS.filter((tool) => ['lazy', 'loading'].includes(toolStatuses.value[tool]?.status)).length
-  const excludedCount = TOOL_KEYS.filter((tool) => toolStatuses.value[tool]?.status === 'excluded').length
-  if (lazyCount || excludedCount) {
-    return `Tool health degraded: ${lazyCount} heavy tools are lazy/loading and ${excludedCount} tool is excluded.`
+  const issueCount = unavailableTools.value.length + errorTools.value.length
+  if (issueCount) {
+    return `API reachable. ${issueCount} tool runtime issue${issueCount === 1 ? '' : 's'} reported.`
   }
-  return 'Tool registry responded quickly and core services are visible.'
+  return `API reachable. ${lazyTools.value.length} lazy resource${lazyTools.value.length === 1 ? '' : 's'} and ${excludedTools.value.length} excluded tool${excludedTools.value.length === 1 ? '' : 's'} are tracked separately.`
 })
 
 const toolAvailabilityChart = computed(() => {
-  const online = activeToolCount.value
-  const offline = Math.max(0, totalTools.value - online)
   return {
-    labels: ['Online', 'Offline'],
+    labels: ['Available', 'Partial', 'Lazy', 'Excluded', 'Unavailable/error'],
     datasets: [
       {
         label: 'Tools',
-        data: [online, offline],
-        backgroundColor: ['#14B8A6', '#CBD5E1'],
+        data: [
+          activeToolCount.value,
+          partialTools.value.length,
+          lazyTools.value.length + loadingTools.value.length,
+          excludedTools.value.length,
+          unavailableTools.value.length + errorTools.value.length,
+        ],
+        backgroundColor: ['#5F7F78', '#A47C48', '#315C8C', '#CBD5E1', '#A85C5C'],
       },
     ],
   }
@@ -813,7 +825,8 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-.capability-grid {
+.capability-grid,
+.workflow-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -1003,6 +1016,7 @@ onUnmounted(() => {
   .service-grid,
   .corpus-list,
   .capability-grid,
+  .workflow-grid,
   .quick-actions-grid {
     grid-template-columns: 1fr;
   }

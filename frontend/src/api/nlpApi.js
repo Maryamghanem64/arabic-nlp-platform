@@ -53,11 +53,12 @@ export async function getDemoToolHealth(runSample = false) {
   }
 }
 
-export async function analyzeAll(text) {
+export async function analyzeAll(text, config = {}) {
   try {
     const { data } = await api.get('/analyze-combined', {
       params: { text },
       timeout: ANALYSIS_TIMEOUT_MS,
+      ...config,
     })
     return data
   } catch (error) {
@@ -65,11 +66,12 @@ export async function analyzeAll(text) {
   }
 }
 
-export async function analyzeTool(tool, text) {
+export async function analyzeTool(tool, text, config = {}) {
   try {
     const { data } = await api.get(`/analyze/${tool}`, {
       params: { text },
       timeout: ANALYSIS_TIMEOUT_MS,
+      ...config,
     })
     return data
   } catch (error) {
@@ -77,11 +79,26 @@ export async function analyzeTool(tool, text) {
   }
 }
 
-export async function evaluateText(text) {
+export async function compareText(text, tools, config = {}) {
+  try {
+    const params = tools ? { text, tools } : { text }
+    const { data } = await api.get('/compare', {
+      params,
+      timeout: ANALYSIS_TIMEOUT_MS,
+      ...config,
+    })
+    return data
+  } catch (error) {
+    unwrap(error, 'Unable to compare analyzer outputs.')
+  }
+}
+
+export async function evaluateText(text, config = {}) {
   try {
     const { data } = await api.get('/evaluate', {
       params: { text },
       timeout: ANALYSIS_TIMEOUT_MS,
+      ...config,
     })
     return data
   } catch (error) {
@@ -89,11 +106,12 @@ export async function evaluateText(text) {
   }
 }
 
-export async function fusionText(text) {
+export async function fusionText(text, config = {}) {
   try {
     const { data } = await api.get('/fusion', {
       params: { text },
       timeout: ANALYSIS_TIMEOUT_MS,
+      ...config,
     })
     return data
   } catch (error) {

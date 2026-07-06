@@ -2,127 +2,123 @@
 
 ## Purpose
 
-This platform compares the outputs of multiple Arabic NLP analyzers. It does not evaluate against a human-annotated gold standard, and it does not claim that tool agreement equals linguistic correctness.
+This platform performs agreement-based, capability-aware evaluation of Arabic NLP analyzer outputs. It does not evaluate against a human-annotated gold standard, and it does not claim that analyzer agreement equals linguistic correctness.
 
-Agreement values on this platform describe similarity between analyzer outputs only.
+The evaluation layer answers a narrower research question: when multiple tools are capable of producing a given linguistic feature, how similar are their outputs on the submitted text?
 
-## What Is Evaluated
+## Core Principle
 
-The evaluation layer reports:
+Evaluation is scoped by capability. A tool is included in a metric only when all of the following are true:
+
+- The tool supports the evaluated feature.
+- The tool is available for the current run.
+- The tool produced comparable values after normalization and alignment.
+- The tool is not lazy, loading, unavailable, timed out, missing resources, excluded, or otherwise degraded for that feature.
+
+Unsupported or unavailable tools are excluded from the denominator. They are not counted as wrong outputs.
+
+## Evaluated Features
+
+The evaluation endpoint reports:
 
 - POS agreement
-- Lemma agreement
-- Exact lemma match
-- Normalized lemma match
-- Segmentation coverage
+- Lemma match, including exact and normalized match fields
 - Root agreement
-- Processing time
-- Active and excluded tools
+- Segmentation coverage
+- Active tools
+- Excluded tools
+- Capability contributors
+- Metric contributors
+- Alignment metadata
+- Methodology notes and degraded-tool notes
 
-The evaluation output is produced from the backend responses returned by the analyzers and the comparison/alignment services.
+These metrics are agreement indicators, not accuracy, precision, recall, or F1 against a gold reference. Backward-compatible fields named `pos_precision`, `pos_recall`, and `pos_f1` are agreement-derived proxy fields and should not be described as supervised accuracy metrics.
 
-## Input Source
+## Capability Contributors
 
-The input is user-submitted Arabic text.
+The backend uses capability sets for each metric:
 
-- In the frontend, the user types or selects a sentence.
-- The frontend sends that sentence to the backend `/compare` and `/evaluate` endpoints.
-- The backend runs the available analyzers on the same text.
+- POS: CAMeL, Stanza, UDPipe, SinaTools, AlKhalil
+- Lemma: CAMeL, Stanza, Qalsadi, AlKhalil, UDPipe, SinaTools
+- Root: CAMeL, AlKhalil, SinaTools
+- Segmentation: Farasa, CAMeL, AlKhalil, SinaTools
+- Dependency: Stanza, UDPipe
+- Contextual: AraBERT, reported separately when available
 
-## Token Normalization
+MADAMIRA is excluded from current evaluation because required licensed resources are not available in the defense configuration. AraBERT is listed only as contextual evidence and is excluded from direct morphology, lemma, root, POS, segmentation, and dependency metrics.
 
-Before comparison, each analyzer output is normalized into a common token schema.
+## Excluded Statuses
 
-Normalization includes:
+The evaluation service excludes tools with statuses such as:
 
-- extracting the token surface form
-- extracting lemma, root, POS, gloss, segmentation, dependency, features, and confidence when present
-- converting tool-specific POS labels to comparable POS labels
-- preserving missing values as missing rather than inventing replacements
+- `timeout`
+- `unavailable`
+- `future_work`
+- `lazy`
+- `disabled`
+- `lazy_not_loaded`
+- `loading`
+- `missing_resources`
+- `excluded`
+- `skipped_low_memory`
 
-The compare flow then aligns tokens by surface string and segmentation-aware span matching.
+Farasa receives explicit degraded handling. If Farasa times out or returns an unavailable/degraded status, it remains visible to the UI but is removed from segmentation scoring for that run.
 
-## Agreement Calculation
+## Normalization and Alignment
 
-Agreement is a similarity score based on the outputs of the active analyzers.
+Before evaluation, raw analyzer outputs are normalized into a common token structure. Normalization extracts or preserves:
 
-It is not accuracy.
-It is not a gold-standard score.
-It is not a correctness label.
+- Surface form
+- Lemma
+- Root
+- POS or UPOS
+- Segmentation
+- Dependency evidence
+- Morphological features
+- Confidence metadata when present
 
-### Weighted POS Agreement
+The alignment layer selects a dynamic available base, preferring Farasa when usable and falling back to other available token streams when necessary. This avoids making the entire evaluation structurally dependent on Farasa.
 
-POS agreement is computed from the aligned tokens using tool weights:
+## POS Agreement
 
-- CAMeL: `0.35`
-- Stanza: `0.35`
-- UDPipe: `0.15`
-- Qalsadi: `0.10`
-- AlKhalil: `0.05`
+POS agreement is computed only from POS-capable tools that are active and comparable in the current run. Tool-specific labels are normalized before comparison. AlKhalil POS evidence is canonicalized against contextual votes to reduce false conflicts caused by label-format differences.
 
-For each aligned token:
+The POS score is the average majority-agreement ratio across aligned tokens with at least two POS contributors.
 
-1. Collect the available normalized POS values from the tools.
-2. Ignore missing values and the generic `X` label.
-3. Sum the weights for each distinct POS value.
-4. Divide the highest supported weight by the total supported weight.
+## Lemma Match
 
-The reported POS agreement is the weighted majority ratio, averaged across aligned tokens that have POS evidence.
+Lemma match is agreement-based. Lemmas are normalized by removing comparison-irrelevant variation such as diacritics and certain orthographic differences before voting.
 
-### Lemma Agreement
+The endpoint exposes exact and normalized lemma fields for frontend compatibility, but the current service computes them as agreement-derived indicators rather than gold-standard matches.
 
-Lemma agreement is computed twice:
+## Root Agreement
 
-- exact lemma agreement
-- normalized lemma agreement
+Root agreement compares normalized root evidence from root-capable tools. Diacritics and separators are normalized before comparison. Functional-word roots should be interpreted carefully because roots are less meaningful for many particles, prepositions, and conjunctions.
 
-The computation uses the same weighted majority logic as POS agreement.
+## Segmentation Coverage
 
-For normalized lemma agreement, each lemma is passed through the platform's lemma normalization helper before voting.
+Segmentation coverage reports whether aligned tokens have usable segmentation evidence from segmentation-capable contributors. It is a coverage/completeness signal, not a correctness score.
 
-### Root Agreement
+Farasa is the strongest segmentation contributor, but segmentation disagreement often reflects different clitic-splitting conventions rather than analyzer failure.
 
-Root agreement is computed on aligned tokens by comparing the available root values after stripping Arabic diacritics.
+## Tool-Specific Methodology Notes
 
-The backend counts a token as root-agreeing when the available root values match the reference root chosen for that token.
-
-### Segmentation Comparison
-
-Segmentation is compared using Farasa as the preferred segmentation source when it is available.
-
-The backend compares the aligned Farasa segmentation with the aligned base-token segmentation by joining the segments into strings and checking whether they match.
-
-This is a comparison of analyzer outputs, not a validation against an external gold corpus.
-
-## Coverage
-
-Coverage describes how much aligned token evidence is present for the current sentence.
-
-The evaluation endpoint reports segmentation coverage as the proportion of aligned tokens that have usable segmentation evidence in the base alignment.
-
-Coverage is a completeness indicator, not a correctness score.
-
-## Processing Time
-
-Processing time is reported as runtime measured around the frontend request and, where available, as per-tool runtime in the backend payload.
-
-The frontend measures elapsed request time with `performance.now()`.
-The backend also attaches runtime fields such as `runtime_ms` or `elapsed` when a tool response includes them.
-
-## Penn Arabic Treebank Note
-
-This platform does not directly evaluate against the Penn Arabic Treebank because it is a licensed corpus.
-Some integrated NLP tools were originally developed or evaluated using ATB in their respective publications.
-
-That historical context does not mean this platform uses ATB as its own evaluation reference.
+- CAMeL: primary morphology, lemma, root, and POS contributor.
+- Farasa: primarily a segmentation contributor; timeout/degraded behavior is excluded from scoring.
+- Stanza: POS, lemma, and UD syntax contributor; tokenization and multi-word-token behavior can differ from other analyzers.
+- Qalsadi: lemma-focused partial contributor.
+- AlKhalil: morphology/root contributor; POS labels require canonical normalization.
+- UDPipe: UD POS and dependency contributor.
+- SinaTools: local lexical-resource contributor; included only when loaded and comparable.
+- AraBERT: contextual support only; excluded from direct morphology metrics.
+- MADAMIRA: excluded because required licensed resources are missing.
 
 ## Interpretation Rules
 
-When reading the UI:
+When reading the UI or reports:
 
-- Agreement means similarity between tool outputs
-- Coverage means available evidence, not correctness
-- Conflict counts show disagreement across tools
-- Confidence values are backend-derived evidence summaries
-
-The Evaluation and Compare pages must not present majority agreement as correctness.
+- Agreement means similarity between analyzer outputs.
+- Coverage means available evidence, not correctness.
+- Conflict counts show disagreement among comparable outputs.
+- Confidence values summarize available evidence; they are not gold-standard probabilities.
+- Excluded/lazy/unavailable tools should be visible but should not reduce metric scores.
