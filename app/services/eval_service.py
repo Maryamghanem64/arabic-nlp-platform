@@ -20,18 +20,37 @@ from backend.services.normalizer import (
 # ============================================================
 
 EXCLUDED_STATUSES = {
-    "error",
+    "timeout",
     "unavailable",
     "future_work",
     "lazy",
     "disabled",
-    "timeout",
     "lazy_not_loaded",
     "loading",
     "missing_resources",
     "excluded",
     "skipped_low_memory",
+    # Note: we intentionally do NOT treat general "error" as excluded globally.
+    # Fix-1 handles Farasa timeout/error degradation explicitly.
 }
+
+FARASA_DEGRADED_STATUSES = {
+    "timeout",
+    "error",
+    "unavailable",
+    "missing_resources",
+    "lazy_not_loaded",
+    "loading",
+}
+
+
+# Fix-1: For evaluation scoring we explicitly exclude Farasa failure states
+# by treating them as degraded evidence rather than “wrong output”.
+FARASA_DEGRADED_NOTE = (
+    "Farasa segmentation unavailable for this run; evaluation continued with available tools."
+)
+
+
 
 
 POS_CAPABLE = {
@@ -576,6 +595,22 @@ def evaluate_tools(
         ]
     )
 
+    farasa_degraded = str(
+        all_statuses.get("farasa", "") or ""
+    ).strip().lower() in FARASA_DEGRADED_STATUSES
+
+    # Fix-1: If Farasa is degraded (timeout/error/unavailable), treat it as
+    # excluded evidence for scoring while keeping it visible in UI.
+    # We ensure it does not enter active_tools and does not count towards coverage.
+    farasa_note = None
+
+    if farasa_degraded:
+        if "farasa" in active_tools:
+            active_tools = [t for t in active_tools if t != "farasa"]
+        farasa_note = FARASA_DEGRADED_NOTE
+
+
+
     excluded_tools = sorted(
         [
             name
@@ -584,9 +619,12 @@ def evaluate_tools(
                 str(status or "").lower()
                 in EXCLUDED_STATUSES
                 or name == "madamira"
+                or (name == "farasa" and farasa_degraded)
             )
         ]
     )
+
+
 
     # --------------------------------------------------------
     # Dynamic alignment base
@@ -630,6 +668,14 @@ def evaluate_tools(
     contributors = _capability_contributors(
         normalized_results
     )
+
+    # Fix-1: Do not use Farasa evidence for segmentation coverage when Farasa is degraded.
+    if farasa_degraded:
+        if "farasa" in contributors.get("segmentation", []):
+            contributors["segmentation"] = [
+                t for t in contributors["segmentation"] if t != "farasa"
+            ]
+
 
     # --------------------------------------------------------
     # Metric accumulators
@@ -774,14 +820,35 @@ def evaluate_tools(
 
             pos_evaluated_tokens += 1
 
-            pos_conflicts.extend(
-                _pairwise_conflicts(
-                    word=word,
-                    feature="pos",
-                    normalized_values=pos_values,
-                    raw_values=pos_raw_values,
-                )
+            token_tools = set(pos_values.keys())
+            sinatools_involved = "sinatools" in token_tools
+
+            pair_conflicts = _pairwise_conflicts(
+                word=word,
+                feature="pos",
+                normalized_values=pos_values,
+                raw_values=pos_raw_values,
             )
+
+            # Fix-2: SinaTools lexical POS disagreement should be downgraded
+            # when majority consensus among high-capability tools agrees.
+            if sinatools_involved and pair_conflicts:
+                # Count how many other tools agree with the majority value.
+                consensus_ok = (
+                    _majority_agreement(pos_values)[0] >= 0.67
+                )
+                if consensus_ok:
+                    for c in pair_conflicts:
+                        if c.get("feature") == "pos" and (
+                            c.get("tool_a") == "sinatools" or c.get("tool_b") == "sinatools"
+                        ):
+                            c["severity"] = "medium"
+                            c["note"] = (
+                                "Single-tool lexical POS disagreement; consensus selected by capability-aware fusion."
+                            )
+
+            pos_conflicts.extend(pair_conflicts)
+
 
         # ----------------------------------------------------
         # Lemma agreement
@@ -989,5 +1056,8 @@ def evaluate_tools(
             "wrong. Alignment uses a dynamic available "
             "token base and does not structurally depend "
             "on Farasa."
+        ),
+        "degraded_notes": (
+            [farasa_note] if farasa_note else []
         ),
     }

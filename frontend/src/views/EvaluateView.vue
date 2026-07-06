@@ -2,23 +2,23 @@
   <div class="page-wrap eval-page page-stack">
     <section class="hero-band eval-hero">
       <div class="hero-content">
-        <span class="eyebrow">Evaluation report</span>
-        <h1 class="hero-title">Scientific tool agreement and coverage analysis.</h1>
+        <span class="eyebrow">Capability-aware evaluation</span>
+        <h1 class="hero-title">Report observed agreement without claiming gold-standard accuracy.</h1>
         <p class="hero-copy">
-          The page reports direct analyzer-derived metrics for agreement, coverage, active tools, and runtime.
+          The page evaluates comparable analyzer evidence only. Unsupported capabilities are excluded from metric
+          denominators, and every score is interpreted as consistency between tools rather than correctness.
         </p>
-        <p class="page-note">
-          Results shown on this page are computed directly from analyzer outputs. No AI-generated interpretation is used.
-        </p>
+        <p class="page-note">No AI-generated interpretation is used. Metrics are derived directly from analyzer outputs.</p>
       </div>
     </section>
 
     <section class="panel panel-pad input-section">
       <div class="section-head">
         <div>
-          <h2 class="section-title">Arabic Input</h2>
-          <p class="section-subtitle">The backend runs its evaluation pipeline against the current sentence.</p>
+          <h2 class="section-title">Arabic input</h2>
+          <p class="section-subtitle">Run the backend evaluation pipeline on one sentence.</p>
         </div>
+        <span class="method-chip">Agreement ≠ accuracy</span>
       </div>
 
       <div class="input-row">
@@ -26,111 +26,151 @@
           id="eval-input"
           v-model="inputText"
           class="arabic-input"
-          placeholder="Example: \u0642\u0631\u0623 \u0627\u0644\u0637\u0627\u0644\u0628 \u0627\u0644\u0643\u062a\u0628 \u0641\u064a \u0627\u0644\u0645\u0643\u062a\u0628\u0629"
+          placeholder="مثال: قرأ الطالب الكتب في المكتبة"
           rows="2"
           dir="rtl"
           lang="ar"
         ></textarea>
+
         <button class="run-btn" :disabled="loading || !inputText.trim()" @click="runEvaluation">
-          {{ loading ? 'Running evaluation...' : 'Run evaluation' }}
+          {{ loading ? 'Computing...' : 'Run evaluation' }}
         </button>
       </div>
 
       <div class="examples-row">
-        <button v-for="ex in EXAMPLE_SENTENCES" :key="ex" class="example-chip" @click="runExample(ex)">
+        <span class="examples-label">Examples:</span>
+        <button
+          v-for="ex in EXAMPLE_SENTENCES"
+          :key="ex"
+          class="example-chip"
+          type="button"
+          @click="runExample(ex)"
+        >
           {{ ex }}
         </button>
       </div>
     </section>
 
-    <div v-if="error" class="error-banner">{{ error }}</div>
+    <section class="evaluation-scope-strip">
+      <article v-for="item in scopeItems" :key="item.title" class="scope-card">
+        <span>{{ item.kicker }}</span>
+        <strong>{{ item.title }}</strong>
+        <p>{{ item.text }}</p>
+      </article>
+    </section>
 
-    <div v-if="loading" class="loading-state eval-loading">
-      <span class="spinner--dark"></span>
-      <p>Computing agreement metrics and coverage...</p>
+    <details class="panel panel-pad capability-details">
+      <summary>
+        <span>
+          <strong>Capability matrix</strong>
+          <small>Eligibility rules used before metrics are interpreted.</small>
+        </span>
+        <span class="method-chip">Open methodology scope</span>
+      </summary>
+
+      <div class="capability-details-body">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Evaluation scope</h2>
+            <p class="section-subtitle">Each analyzer is evaluated only on the capabilities it can reasonably provide.</p>
+          </div>
+        </div>
+
+        <div class="capability-table-wrap">
+          <table class="capability-table">
+            <thead>
+              <tr>
+                <th>Analyzer</th>
+                <th v-for="feature in capabilityFeatures" :key="feature">{{ feature }}</th>
+                <th>Research role</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in capabilityMatrix" :key="row.key">
+                <td><ToolBadge :tool="row.key" /></td>
+                <td v-for="feature in capabilityFeatures" :key="feature">
+                  <span :class="['cap-cell', capabilityClass(row[feature])]">{{ row[feature] }}</span>
+                </td>
+                <td class="role-cell">{{ row.role }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="scope-footnote">
+          SinaTools is listed as an optional local-resource analyzer. It contributes only when its local resources are
+          available. AraBERT is contextual evidence and is not treated as a direct morphology-table competitor.
+        </p>
+      </div>
+    </details>
+
+    <div v-if="error" class="error-banner">
+      <strong>Evaluation failed</strong>
+      <span>{{ error }}</span>
     </div>
 
-    <section v-if="evalResult && !loading" class="metrics-section">
-      <div class="kpi-grid">
-        <article class="kpi-card">
-          <div class="kpi-label">POS agreement</div>
-          <div class="kpi-value" :class="getScoreClass(evalResult.pos_agreement)">
-            {{ percentLabel(evalResult.pos_agreement, 1) }}
+    <div v-if="loading" class="loading-state eval-loading">
+      <span class="spinner--dark" aria-hidden="true"></span>
+      <p>Computing capability-scoped agreement evidence...</p>
+    </div>
+
+    <template v-if="evalResult && !loading">
+      <section class="panel panel-pad run-panel">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">Run participation</h2>
+            <p class="section-subtitle">Tools reported by the backend for this evaluation request.</p>
           </div>
-          <div class="kpi-note">Across the active analyzers</div>
-        </article>
+          <span class="runtime-chip">{{ requestDuration }} ms request</span>
+        </div>
 
-        <article class="kpi-card">
-          <div class="kpi-label">Normalized lemma match</div>
-          <div class="kpi-value" :class="getScoreClass(evalResult.lemma_normalized_match)">
-            {{ percentLabel(evalResult.lemma_normalized_match, 1) }}
-          </div>
-          <div class="kpi-note">After diacritic and orthographic normalization</div>
-        </article>
+        <div class="participation-grid">
+          <article class="report-card">
+            <span class="report-label">Participating tools</span>
+            <div class="tool-row">
+              <ToolBadge v-for="tool in activeTools" :key="tool" :tool="tool" />
+              <span v-if="!activeTools.length" class="null-value">No participating tools returned.</span>
+            </div>
+          </article>
 
-        <article class="kpi-card">
-          <div class="kpi-label">Exact lemma match</div>
-          <div class="kpi-value" :class="getScoreClass(evalResult.lemma_exact_match)">
-            {{ percentLabel(evalResult.lemma_exact_match, 1) }}
-          </div>
-          <div class="kpi-note">Strict token-level match</div>
-        </article>
-
-        <article class="kpi-card">
-          <div class="kpi-label">Segmentation coverage</div>
-          <div class="kpi-value" :class="getScoreClass(evalResult.segmentation_coverage)">
-            {{ percentLabel(evalResult.segmentation_coverage, 0) }}
-          </div>
-          <div class="kpi-note">Farasa segmentation availability</div>
-        </article>
-      </div>
-
-      <section class="analysis-visual-grid">
-        <ScientificChart
-          type="radar"
-          title="Overall Evaluation"
-          subtitle="Agreement, lemma, and coverage values."
-          badge="Score"
-          :labels="overallRadar.labels"
-          :datasets="overallRadar.datasets"
-          :height="280"
-          aria-label="Overall evaluation radar chart"
-          empty-title="No evaluation data"
-          empty-text="Run the evaluation pipeline to populate the score radar."
-        />
-
-        <ScientificChart
-          type="bar"
-          title="Performance Snapshot"
-          subtitle="Agreement and coverage at a glance."
-          badge="Metrics"
-          :labels="performanceBar.labels"
-          :datasets="performanceBar.datasets"
-          :height="280"
-          aria-label="Performance snapshot chart"
-          empty-title="No performance data"
-          empty-text="The metrics chart appears after evaluation completes."
-        />
-
-        <ScientificChart
-          type="bar"
-          title="Runtime and Scale"
-          subtitle="Frontend-measured response time and token volume."
-          badge="Timing"
-          :labels="runtimeBar.labels"
-          :datasets="runtimeBar.datasets"
-          :height="280"
-          aria-label="Runtime chart"
-          empty-title="No runtime data"
-          empty-text="A completed request is required to show runtime metrics."
-        />
+          <article class="report-card">
+            <span class="report-label">Excluded / unavailable</span>
+            <div class="excluded-list">
+              <span v-for="tool in excludedTools" :key="tool">{{ tool }}</span>
+              <span v-if="!excludedTools.length" class="null-value">None reported</span>
+            </div>
+          </article>
+        </div>
       </section>
+
+      <section class="metrics-section">
+        <article v-for="metric in metricCards" :key="metric.key" class="kpi-card">
+          <span class="kpi-label">{{ metric.label }}</span>
+          <strong class="kpi-value" :class="getScoreClass(metric.value)">
+            {{ percentLabel(metric.value, metric.digits) }}
+          </strong>
+          <p class="kpi-note">{{ metric.note }}</p>
+        </article>
+      </section>
+
+      <ScientificChart
+        type="bar"
+        title="Observed Agreement Metrics"
+        subtitle="Separate capability-scoped indicators; no composite quality score is computed."
+        badge="Observed evidence"
+        :labels="observedMetrics.labels"
+        :datasets="observedMetrics.datasets"
+        :height="300"
+        aria-label="Observed agreement metrics"
+        empty-title="No evaluation metrics"
+        empty-text="Run evaluation to populate capability-scoped indicators."
+      />
 
       <section class="panel panel-pad report-panel">
         <div class="section-head">
           <div>
-            <h2 class="section-title">Metrics Summary</h2>
-            <p class="section-subtitle">Direct counts and availability indicators from the current run.</p>
+            <h2 class="section-title">Disagreement evidence and interpretation boundary</h2>
+            <p class="section-subtitle">Backend conflict rows are preserved without assigning a gold answer.</p>
           </div>
           <a class="methodology-link" href="/docs/evaluation_methodology.md" target="_blank" rel="noreferrer">
             Evaluation methodology
@@ -139,40 +179,36 @@
 
         <div class="report-grid">
           <article class="report-card">
-            <span class="report-label">Active tools</span>
-            <div class="tool-row">
-              <ToolBadge v-for="tool in activeTools" :key="tool" :tool="tool" />
-              <span v-if="!activeTools.length" class="null-value">No active tools were returned.</span>
-            </div>
-          </article>
+            <span class="report-label">Reported POS disagreements</span>
 
-          <article class="report-card">
-            <span class="report-label">Excluded tools</span>
-            <div class="excluded-row">
-              <span v-if="excludedTools.length" class="ltr-value">{{ excludedTools.join(', ') }}</span>
-              <span v-else class="null-value">None</span>
-            </div>
-          </article>
-
-          <article class="report-card">
-            <span class="report-label">POS conflicts</span>
             <div class="conflict-mini-grid">
               <div v-for="(conflict, index) in posConflicts" :key="index" class="conflict-card">
-                <strong class="arabic-value">{{ conflict.word || conflict.token || `#${index + 1}` }}</strong>
-                <span class="conflict-badge">{{ conflict.feature || 'POS' }}</span>
+                <strong class="arabic-value" dir="rtl" lang="ar">
+                  {{ conflict.word || conflict.token || `#${index + 1}` }}
+                </strong>
+                <span class="disagreement-badge">{{ conflict.feature || 'POS' }}</span>
                 <span class="conflict-text">{{ conflictText(conflict) }}</span>
               </div>
-              <span v-if="!posConflicts.length" class="null-value">No POS conflicts were reported.</span>
+
+              <span v-if="!posConflicts.length" class="null-value">No POS disagreements were reported.</span>
             </div>
           </article>
 
-          <article class="report-card">
-            <span class="report-label">Raw note</span>
-            <p class="metrics-note">{{ rawNote || 'The backend did not return an additional note for this run.' }}</p>
+          <article class="report-card interpretation-card">
+            <span class="report-label">Interpretation boundary</span>
+            <p class="metrics-note">
+              {{ rawNote || 'Metrics are capability-aware. Each score is computed only over tools that support the evaluated linguistic feature. Agreement indicates consistency of output, not correctness against a gold standard.' }}
+            </p>
+
+            <ul class="boundary-list">
+              <li>High agreement can still be wrong without gold labels.</li>
+              <li>Low agreement can reflect valid analyzer convention differences.</li>
+              <li>Unsupported features are excluded rather than penalized.</li>
+            </ul>
           </article>
         </div>
       </section>
-    </section>
+    </template>
   </div>
 </template>
 
@@ -195,64 +231,159 @@ const rawNote = ref('')
 const requestDuration = ref(0)
 
 const EXAMPLE_SENTENCES = [
-  '\u0642\u0631\u0623 \u0627\u0644\u0637\u0627\u0644\u0628 \u0627\u0644\u0643\u062a\u0628 \u0641\u064a \u0627\u0644\u0645\u0643\u062a\u0628\u0629',
-  '\u0648\u062c\u062f\u062a \u0627\u0644\u0645\u0639\u0644\u0645\u0629 \u0637\u0627\u0644\u0628\u0629 \u0645\u062c\u062a\u0647\u062f\u0629 \u0641\u064a \u0627\u0644\u0641\u0635\u0644',
+  'قرأ الطالب الكتب في المكتبة',
+  'وجدت المعلمة طالبة مجتهدة في الفصل',
+  'يكتب الصحفي المقالة كل يوم',
 ]
 
-const overallRadar = computed(() => ({
-  labels: ['POS', 'Lemma match', 'Coverage', 'Exact lemma'],
-  datasets: [
-    {
-      label: 'Score %',
-      data: evalResult.value
-        ? [
-            toPercent(evalResult.value.pos_agreement),
-            toPercent(evalResult.value.lemma_normalized_match),
-            toPercent(evalResult.value.segmentation_coverage),
-            toPercent(evalResult.value.lemma_exact_match),
-          ]
-        : [0, 0, 0, 0],
-      borderColor: '#14B8A6',
-      backgroundColor: 'rgba(20, 184, 166, 0.16)',
-    },
-  ],
-}))
+const scopeItems = [
+  {
+    kicker: 'Scope',
+    title: 'Capability-first denominator',
+    text: 'A metric only includes tools that support the evaluated feature.',
+  },
+  {
+    kicker: 'Interpretation',
+    title: 'Agreement is consistency',
+    text: 'The score does not claim correctness without labeled gold data.',
+  },
+  {
+    kicker: 'Evidence',
+    title: 'Conflicts remain inspectable',
+    text: 'Disagreements are preserved as evidence rather than hidden behind one score.',
+  },
+]
 
-const performanceBar = computed(() => ({
-  labels: ['POS', 'Lemma', 'Coverage', 'Exact'],
-  datasets: [
-    {
-      label: 'Percentage',
-      data: evalResult.value
-        ? [
-            toPercent(evalResult.value.pos_agreement),
-            toPercent(evalResult.value.lemma_normalized_match),
-            toPercent(evalResult.value.segmentation_coverage),
-            toPercent(evalResult.value.lemma_exact_match),
-          ]
-        : [0, 0, 0, 0],
-      backgroundColor: ['#4F46E5', '#14B8A6', '#D97706', '#7C3AED'],
-    },
-  ],
-}))
+const capabilityFeatures = ['segmentation', 'lemma', 'root', 'pos', 'morphology', 'dependency']
 
-const runtimeBar = computed(() => ({
-  labels: ['Request ms', 'Tokens', 'Active tools'],
+const capabilityMatrix = [
+  {
+    key: 'farasa',
+    segmentation: 'Strong',
+    lemma: 'N/A',
+    root: 'N/A',
+    pos: 'N/A',
+    morphology: 'N/A',
+    dependency: 'N/A',
+    role: 'Segmentation anchor',
+  },
+  {
+    key: 'camel',
+    segmentation: 'N/A',
+    lemma: 'Strong',
+    root: 'Strong',
+    pos: 'Strong',
+    morphology: 'Strong',
+    dependency: 'N/A',
+    role: 'Primary morphology evidence',
+  },
+  {
+    key: 'sinatools',
+    segmentation: 'N/A',
+    lemma: 'Strong',
+    root: 'Supported',
+    pos: 'Strong',
+    morphology: 'Supported',
+    dependency: 'N/A',
+    role: 'Optional lexical-morphology evidence',
+  },
+  {
+    key: 'alkhalil',
+    segmentation: 'N/A',
+    lemma: 'Supported',
+    root: 'Supported',
+    pos: 'Supported',
+    morphology: 'Strong',
+    dependency: 'N/A',
+    role: 'Rule-based morphology support',
+  },
+  {
+    key: 'stanza',
+    segmentation: 'N/A',
+    lemma: 'Supported',
+    root: 'N/A',
+    pos: 'Strong',
+    morphology: 'Supported',
+    dependency: 'Strong',
+    role: 'UD syntax expert',
+  },
+  {
+    key: 'udpipe',
+    segmentation: 'N/A',
+    lemma: 'Supported',
+    root: 'N/A',
+    pos: 'Strong',
+    morphology: 'Supported',
+    dependency: 'Strong',
+    role: 'Independent UD syntax support',
+  },
+  {
+    key: 'qalsadi',
+    segmentation: 'N/A',
+    lemma: 'Supported',
+    root: 'N/A',
+    pos: 'N/A',
+    morphology: 'Partial',
+    dependency: 'N/A',
+    role: 'Rule-based lexical support',
+  },
+  {
+    key: 'arabert',
+    segmentation: 'N/A',
+    lemma: 'N/A',
+    root: 'N/A',
+    pos: 'N/A',
+    morphology: 'N/A',
+    dependency: 'N/A',
+    role: 'Contextual representation; outside direct feature agreement',
+  },
+]
+
+const metricCards = computed(() => [
+  {
+    key: 'pos',
+    label: 'POS agreement',
+    value: evalResult.value?.pos_agreement,
+    digits: 1,
+    note: 'Only eligible POS analyzers are included.',
+  },
+  {
+    key: 'lemma_norm',
+    label: 'Normalized lemma match',
+    value: evalResult.value?.lemma_normalized_match,
+    digits: 1,
+    note: 'Orthographic normalization applied before matching.',
+  },
+  {
+    key: 'lemma_exact',
+    label: 'Exact lemma match',
+    value: evalResult.value?.lemma_exact_match,
+    digits: 1,
+    note: 'Strict token-level equality, convention-sensitive.',
+  },
+  {
+    key: 'seg',
+    label: 'Segmentation coverage',
+    value: evalResult.value?.segmentation_coverage,
+    digits: 0,
+    note: 'Availability of segmentation evidence.',
+  },
+])
+
+const observedMetrics = computed(() => ({
+  labels: ['POS agreement', 'Normalized lemma', 'Exact lemma', 'Segmentation coverage'],
   datasets: [
     {
-      label: 'Current run',
-      data: [
-        requestDuration.value,
-        inputText.value.trim() ? inputText.value.trim().split(/\s+/).length : 0,
-        activeTools.value.length,
-      ],
-      backgroundColor: ['#4F46E5', '#14B8A6', '#D97706'],
+      label: 'Observed %',
+      data: metricCards.value.map((metric) => toPercent(metric.value)),
+      backgroundColor: '#315C8C',
     },
   ],
 }))
 
 async function runEvaluation() {
   if (!inputText.value.trim()) return
+
   loading.value = true
   error.value = ''
   evalResult.value = null
@@ -288,18 +419,26 @@ async function runEvaluation() {
       segmentation_coverage: toScalar(raw.segmentation_coverage),
     }
 
-    activeTools.value = raw.active_tools || data.active_tools || []
-    excludedTools.value = raw.excluded_tools || data.excluded_tools || []
-    posConflicts.value = raw.pos_conflicts || raw.all_conflicts || []
+    activeTools.value = normalizeToolList(raw.active_tools || data.active_tools || [])
+    excludedTools.value = normalizeToolList(raw.excluded_tools || data.excluded_tools || [])
+    posConflicts.value = Array.isArray(raw.pos_conflicts)
+      ? raw.pos_conflicts
+      : Array.isArray(raw.all_conflicts)
+        ? raw.all_conflicts
+        : []
     rawNote.value = raw.metrics_note || ''
 
     recordAnalysis({
       page: 'Evaluate',
       text: inputText.value.trim(),
-      summary: `${toPercent(evalResult.value.pos_agreement).toFixed(1)}% POS agreement | ${requestDuration.value} ms`,
+      summary: `${toPercent(evalResult.value.pos_agreement)}% POS agreement | capability-aware`,
     })
   } catch (e) {
-    error.value = e?.response?.data?.detail || e?.message || 'Unable to connect to the evaluation service.'
+    error.value =
+      e?.response?.data?.detail ||
+      e?.response?.data?.error ||
+      e?.message ||
+      'Unable to connect to the evaluation service.'
   } finally {
     loading.value = false
   }
@@ -310,19 +449,37 @@ function runExample(example) {
   runEvaluation()
 }
 
+function normalizeToolList(value) {
+  if (!value) return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  if (typeof value === 'string') {
+    return value
+      .split(/[,\s/]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+function capabilityClass(value) {
+  if (value === 'Strong') return 'cap-strong'
+  if (value === 'Supported') return 'cap-supported'
+  if (value === 'Partial') return 'cap-partial'
+  return 'cap-na'
+}
+
 function toScalar(value) {
   if (value == null) return 0
   if (typeof value === 'number') return value > 1 ? value / 100 : value
   if (typeof value === 'string') {
-    const n = Number.parseFloat(value.replace('%', ''))
-    if (!Number.isFinite(n)) return 0
-    return n > 1 ? n / 100 : n
+    const parsed = Number.parseFloat(value.replace('%', ''))
+    return Number.isFinite(parsed) ? (parsed > 1 ? parsed / 100 : parsed) : 0
   }
   return 0
 }
 
-function toPercent(scalar) {
-  return Math.round(toScalar(scalar) * 100)
+function toPercent(value) {
+  return Math.round(toScalar(value) * 100)
 }
 
 function percentLabel(score, digits = 1) {
@@ -330,56 +487,58 @@ function percentLabel(score, digits = 1) {
 }
 
 function getScoreClass(score) {
-  const n = toScalar(score)
-  if (n >= 0.85) return 'score-high'
-  if (n >= 0.6) return 'score-medium'
+  const value = toScalar(score)
+  if (value >= 0.85) return 'score-high'
+  if (value >= 0.6) return 'score-medium'
   return 'score-low'
 }
 
 function conflictText(conflict) {
-  const valueA = conflict.tool_a_value || conflict.value_a || conflict.camel_pos || ''
-  const valueB = conflict.tool_b_value || conflict.value_b || conflict.stanza_pos || ''
-  const toolA = conflict.tool_a || 'CAMeL'
-  const toolB = conflict.tool_b || 'Stanza'
-  return `${toolA}: ${valueA || '-'} / ${toolB}: ${valueB || '-'}`
+  if (conflict?.camel !== undefined || conflict?.stanza !== undefined) {
+    return `CAMeL: ${conflict.camel ?? 'N/A'} / Stanza: ${conflict.stanza ?? 'N/A'}`
+  }
+
+  if (conflict?.values && typeof conflict.values === 'object') {
+    return Object.entries(conflict.values)
+      .map(([tool, value]) => `${tool}: ${value}`)
+      .join(' / ')
+  }
+
+  return conflict?.message || conflict?.detail || 'Analyzer outputs differ for this feature.'
 }
 </script>
 
 <style scoped>
 .eval-page {
-  display: grid;
-  gap: 18px;
+  width: min(96vw, 1500px);
 }
 
 .eval-hero {
-  min-height: 240px;
+  min-height: 250px;
 }
 
-.input-section {
-  margin-bottom: 0;
-}
-
-.page-note {
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  border-left: 3px solid var(--c-accent-border);
+.page-note,
+.scope-footnote {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-accent-border);
+  border-left: 3px solid var(--c-accent);
   border-radius: 10px;
   background: var(--c-accent-light);
   color: var(--c-accent-text);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .input-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: flex-start;
-  margin-top: 8px;
+  align-items: stretch;
 }
 
 .arabic-input {
-  flex: 1;
-  min-height: 74px;
+  min-height: 86px;
   padding: 12px 16px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-control);
@@ -397,207 +556,368 @@ function conflictText(conflict) {
 }
 
 .run-btn {
-  min-width: 156px;
-  min-height: 52px;
-  padding: 12px 24px;
-  border-radius: var(--radius-control);
-  color: white;
-  background: linear-gradient(135deg, var(--c-text-primary), var(--c-accent));
+  min-width: 160px;
+  border-radius: 8px;
+  background: var(--c-accent);
+  color: #fff;
+  font-weight: 700;
+  padding: 0 18px;
   cursor: pointer;
-  font-size: 15px;
-  font-weight: 600;
 }
 
 .run-btn:disabled {
+  opacity: .55;
   cursor: not-allowed;
-  opacity: 0.55;
 }
 
-.examples-row {
+.examples-row,
+.tool-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
 
+.examples-label {
+  color: var(--c-text-muted);
+  font-size: 12px;
+  align-self: center;
+}
+
 .example-chip {
-  padding: 5px 12px;
   border: 1px solid var(--c-border);
   border-radius: 999px;
-  color: var(--c-text-secondary);
   background: var(--c-page-bg);
+  color: var(--c-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  padding: 6px 11px;
+}
+
+.method-chip,
+.runtime-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--c-accent-border);
+  border-radius: 999px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.evaluation-scope-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scope-card {
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+
+.scope-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--c-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.scope-card strong {
+  display: block;
+  color: var(--c-text-primary);
+  font-size: 15px;
+}
+
+.scope-card p {
+  margin: 7px 0 0;
+  color: var(--c-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.capability-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.capability-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.capability-details summary span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.capability-details summary small {
+  color: var(--c-text-secondary);
+  font-weight: 400;
+}
+
+.capability-details-body {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--c-border);
+}
+
+.capability-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-surface);
+}
+
+.capability-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.capability-table th,
+.capability-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--c-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.capability-table th {
+  background: #f8fafc;
+  color: var(--c-text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.cap-cell {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cap-strong {
+  background: var(--c-agreement-bg);
+  color: var(--c-agreement-text);
+}
+
+.cap-supported {
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+}
+
+.cap-partial {
+  background: var(--c-warning-bg);
+  color: var(--c-warning-text);
+}
+
+.cap-na {
+  background: var(--c-na-bg);
+  color: var(--c-na-text);
+}
+
+.role-cell {
+  min-width: 260px;
+  color: var(--c-text-secondary);
+  white-space: normal;
 }
 
 .error-banner {
+  display: grid;
+  gap: 4px;
   padding: 12px 16px;
-  border: 1px solid var(--c-conf-low-border);
+  border: 1px solid #e7b0b0;
   border-radius: var(--radius-control);
-  color: var(--c-conf-low-text);
-  background: var(--c-conf-low-bg);
+  color: #7e3f3f;
+  background: #fbf2f2;
 }
 
 .eval-loading {
   min-height: 160px;
 }
 
-.metrics-section {
+.participation-grid,
+.report-grid {
   display: grid;
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.kpi-grid {
+.report-card {
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-page-bg);
+}
+
+.report-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.excluded-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.excluded-list span:not(.null-value) {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--c-na-bg);
+  color: var(--c-na-text);
+  font-size: 12px;
+}
+
+.metrics-section {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .kpi-card {
+  display: grid;
+  gap: 7px;
   padding: 16px;
   border: 1px solid var(--c-border);
-  border-radius: 14px;
-  background: var(--c-page-bg);
-  display: grid;
-  gap: 6px;
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
 }
 
 .kpi-label {
   color: var(--c-text-muted);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 800;
+  letter-spacing: .06em;
   text-transform: uppercase;
 }
 
 .kpi-value {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 1.55rem;
+  font-weight: 800;
 }
 
-.kpi-value.score-high {
-  color: #059669;
+.score-high {
+  color: var(--c-agreement-text);
 }
 
-.kpi-value.score-medium {
-  color: #D97706;
+.score-medium {
+  color: var(--c-warning-text);
 }
 
-.kpi-value.score-low {
-  color: #DC2626;
+.score-low {
+  color: var(--c-conflict-text);
 }
 
 .kpi-note {
-  color: var(--c-text-muted);
-  font-size: 12px;
-}
-
-.analysis-visual-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.report-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.report-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--c-border);
-  border-radius: 14px;
-  background: var(--c-page-bg);
-}
-
-.report-label {
-  color: var(--c-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.methodology-link {
-  align-self: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  color: var(--c-accent-text);
-  background: var(--c-accent-light);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.tool-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.excluded-row {
+  margin: 0;
   color: var(--c-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .conflict-mini-grid {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .conflict-card {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(80px, auto) auto minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  padding: 12px;
-  border: 1px solid var(--c-conf-med-border);
-  border-radius: var(--radius-control);
-  background: var(--c-conf-med-bg);
+  padding: 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.disagreement-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1e5ca;
+  color: #7a5a2e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 
 .conflict-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--c-text-secondary);
-  direction: ltr;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
 }
 
 .metrics-note {
   margin: 0;
   color: var(--c-text-secondary);
-  line-height: 1.55;
+  line-height: 1.7;
 }
 
-.null-value {
-  color: var(--c-text-muted);
-  font-size: 13px;
+.boundary-list {
+  margin: 14px 0 0;
+  padding-left: 18px;
+  color: var(--c-text-secondary);
+  line-height: 1.65;
 }
 
-@media (max-width: 900px) {
-  .kpi-grid {
+.methodology-link {
+  color: var(--c-accent-text);
+  font-weight: 700;
+}
+
+@media (max-width: 1000px) {
+  .eval-page {
+    width: min(100% - 24px, 1240px);
+  }
+
+  .evaluation-scope-strip,
+  .metrics-section {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .analysis-visual-grid,
+  .participation-grid,
   .report-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 760px) {
-  .input-row {
+@media (max-width: 640px) {
+  .input-row,
+  .evaluation-scope-strip,
+  .metrics-section {
     grid-template-columns: 1fr;
-    flex-direction: column;
   }
 
   .run-btn {
-    width: 100%;
+    min-height: 46px;
   }
 
-  .kpi-grid {
-    grid-template-columns: 1fr 1fr;
+  .capability-details summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .conflict-card {
+    grid-template-columns: 1fr;
   }
 }
 </style>

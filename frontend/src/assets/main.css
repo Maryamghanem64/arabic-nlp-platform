@@ -25,10 +25,22 @@
   --c-conf-low-border: #EF4444;
   --c-conf-low-text: #DC2626;
 
-  --c-accent: #4F46E5;
-  --c-accent-light: #EEF2FF;
-  --c-accent-border: #C7D2FE;
-  --c-accent-text: #4338CA;
+  --c-accent: #315C8C;
+  --c-accent-light: #EEF4F9;
+  --c-accent-border: #C9D8E6;
+  --c-accent-text: #244A73;
+
+  --c-agreement-bg: #F0F7F4;
+  --c-agreement-border: #5F7F78;
+  --c-agreement-text: #365F56;
+  --c-warning-bg: #FBF7EE;
+  --c-warning-border: #A47C48;
+  --c-warning-text: #75572F;
+  --c-conflict-bg: #FBF2F2;
+  --c-conflict-border: #A85C5C;
+  --c-conflict-text: #7E3F3F;
+  --c-na-bg: #F3F5F7;
+  --c-na-text: #667085;
 
   --c-surface: #FFFFFF;
   --c-page-bg: #F8FAFC;
@@ -62,8 +74,8 @@
   --green: var(--c-conf-high-border);
   --red: var(--c-conf-low-border);
   --slate: var(--c-text-secondary);
-  --shadow: 0 18px 48px rgba(23, 32, 51, 0.09);
-  --shadow-soft: 0 10px 30px rgba(23, 32, 51, 0.06);
+  --shadow: 0 12px 30px rgba(23, 32, 51, 0.07);
+  --shadow-soft: 0 4px 14px rgba(23, 32, 51, 0.045);
 }
 
 * {
@@ -77,10 +89,7 @@ html {
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at 16% -10%, rgba(79, 70, 229, 0.08), transparent 34%),
-    radial-gradient(circle at 86% 0%, rgba(5, 150, 105, 0.08), transparent 30%),
-    linear-gradient(180deg, #F8FBFF 0%, var(--c-page-bg) 46%, #EEF3F8 100%);
+  background: linear-gradient(180deg, #F8FAFC 0%, var(--c-page-bg) 58%, #F1F5F9 100%);
   color: var(--c-text-primary);
   font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   font-size: 15px;
@@ -138,17 +147,17 @@ h3 {
 .hero-band {
   position: relative;
   overflow: hidden;
-  min-height: 280px;
+  min-height: 230px;
   display: grid;
   align-content: end;
   gap: 18px;
-  padding: 38px;
+  padding: 32px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: var(--radius-card);
   color: #fff;
   background:
-    linear-gradient(135deg, rgba(14, 38, 68, 0.98), rgba(17, 78, 94, 0.94) 55%, rgba(79, 70, 229, 0.90)),
-    radial-gradient(circle at 76% 20%, rgba(255, 255, 255, 0.22), transparent 26%);
+    linear-gradient(120deg, rgba(18, 42, 66, 0.99), rgba(31, 74, 104, 0.97) 62%, rgba(49, 92, 140, 0.95)),
+    radial-gradient(circle at 78% 16%, rgba(255, 255, 255, 0.14), transparent 28%);
   box-shadow: var(--shadow);
 }
 
@@ -173,7 +182,7 @@ h3 {
 .hero-title {
   max-width: 900px;
   margin: 14px 0 10px;
-  font-size: clamp(34px, 5vw, 58px);
+  font-size: clamp(30px, 4vw, 48px);
   line-height: 1.02;
   font-weight: 500;
   letter-spacing: 0;
@@ -183,7 +192,7 @@ h3 {
   max-width: 780px;
   margin: 0;
   color: rgba(255, 255, 255, 0.84);
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.75;
 }
 
@@ -250,8 +259,8 @@ h3 {
 
 .btn-primary {
   color: #fff;
-  background: linear-gradient(135deg, var(--c-text-primary), #1D4ED8);
-  box-shadow: 0 12px 26px rgba(30, 41, 59, 0.18);
+  background: var(--c-accent);
+  box-shadow: 0 8px 18px rgba(49, 92, 140, 0.18);
 }
 
 .btn-secondary {
@@ -290,7 +299,7 @@ h3 {
 }
 
 .panel {
-  backdrop-filter: blur(14px);
+  backdrop-filter: none;
 }
 
 .panel-pad {
@@ -462,7 +471,7 @@ td {
 }
 
 tbody tr:hover td {
-  background: #F8FBFF;
+  background: #F7F9FB;
 }
 
 .muted {
@@ -672,4 +681,184 @@ tbody tr:hover td {
   .arabic-input {
     font-size: 20px;
   }
+}
+
+
+/* Research UI semantic utilities */
+.status-agreement,
+.evidence-complete {
+  color: var(--c-agreement-text);
+  background: var(--c-agreement-bg);
+  border-color: var(--c-agreement-border);
+}
+
+.status-warning,
+.evidence-partial {
+  color: var(--c-warning-text);
+  background: var(--c-warning-bg);
+  border-color: var(--c-warning-border);
+}
+
+.status-conflict,
+.evidence-missing {
+  color: var(--c-conflict-text);
+  background: var(--c-conflict-bg);
+  border-color: var(--c-conflict-border);
+}
+
+.status-na {
+  color: var(--c-na-text);
+  background: var(--c-na-bg);
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(49, 92, 140, 0.24);
+  outline-offset: 2px;
+}
+
+.table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+}
+
+@media (max-width: 1023px) {
+  .page-wrap {
+    width: min(100% - 28px, 1240px);
+  }
+
+  .hero-title {
+    max-width: 760px;
+  }
+}
+
+@media (max-width: 767px) {
+  body {
+    font-size: 14px;
+  }
+
+  .page-wrap {
+    width: min(100% - 20px, 1240px);
+    padding: 16px 0 48px;
+  }
+
+  .page-stack {
+    gap: 14px;
+  }
+
+  .hero-band {
+    min-height: 0;
+    padding: 22px 18px;
+    align-content: center;
+  }
+
+  .hero-band::before {
+    background-size: 28px 28px;
+  }
+
+  .hero-title {
+    margin: 10px 0 8px;
+    font-size: clamp(27px, 9vw, 38px);
+    line-height: 1.08;
+  }
+
+  .hero-copy {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .actions-row {
+    width: 100%;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .actions-row .btn,
+  .actions-row .btn-primary,
+  .actions-row .btn-secondary,
+  .actions-row .btn-subtle,
+  .actions-row .btn-ghost {
+    flex: 1 1 145px;
+  }
+
+  .panel-pad,
+  .section-card {
+    padding: 15px;
+  }
+
+  .section-title {
+    font-size: 19px;
+  }
+
+  .textarea,
+  .text-input,
+  .arabic-input {
+    min-height: 124px;
+    padding: 14px;
+    font-size: 19px;
+  }
+
+  th,
+  td {
+    padding: 11px 12px;
+  }
+
+  .summary-bar {
+    gap: 14px 24px;
+    padding: 14px;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-wrap {
+    width: min(100% - 16px, 1240px);
+  }
+
+  .hero-band {
+    padding: 20px 16px;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    letter-spacing: .06em;
+  }
+
+  .actions-row .btn,
+  .actions-row .btn-primary,
+  .actions-row .btn-secondary,
+  .actions-row .btn-subtle,
+  .actions-row .btn-ghost {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Final research-workbench utilities */
+.research-boundary-note{padding:12px 14px;border-left:3px solid var(--c-accent);background:var(--c-accent-light);color:var(--c-text-secondary)}
+@media(max-width:767px){
+  .table-scroll,.capability-table-wrap{margin-inline:-4px}
+  .token-card,.fusion-card,.tool-card{box-shadow:none}
+  .hero-title{max-width:18ch}
+}
+
+/* Research frontend v2 responsive safety */
+img,svg,canvas{max-width:100%}
+.panel,.section-card,.tool-card,.token-card{min-width:0}
+@media(max-width:900px){
+  .table-scroll{max-width:100%}
+  .desktop-tool-table{display:none!important}
 }

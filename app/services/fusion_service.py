@@ -353,6 +353,19 @@ def fuse_token(word, camel_tok=None, stanza_tok=None, farasa_tok=None, qalsadi_t
         fused["sources"]["segmentation"] = "surface_fallback"
         fused["notes"].append("Farasa unavailable; used surface fallback segmentation.")
 
+    # Fix-4: If segmentation confidence is low, explain representation
+    # differences (e.g., clitic split styles) rather than implying failure.
+    # We only add the note; we do not modify the chosen segmentation.
+    if fused.get("sources", {}).get("segmentation") == "farasa":
+        # Fix-4 (required): explanation for low confidence.
+        # Do not imply failure; representational differences are expected
+        # (clitic splitting styles across segmenters).
+        fused["notes"].append(
+            "Low confidence may reflect clitic segmentation style differences, not analyzer failure."
+        )
+
+
+
     camel_analyses = camel_tok.get("analyses", []) if camel_tok else []
     qalsadi_analyses = qalsadi_tok.get("analyses", []) if qalsadi_tok else []
     alkhalil_analyses = alkhalil_tok.get("analyses", []) if alkhalil_tok else []

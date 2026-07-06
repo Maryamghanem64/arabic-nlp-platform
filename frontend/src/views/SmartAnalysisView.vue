@@ -2,11 +2,11 @@
   <div class="page-wrap smart-page page-stack">
     <section class="hero-band smart-hero">
       <div class="hero-content">
-        <span class="eyebrow">Fusion analysis</span>
-        <h1 class="hero-title">Smart Arabic NLP fusion, explained token by token.</h1>
+        <span class="eyebrow">Expert fusion laboratory</span>
+        <h1 class="hero-title">Capability-based expert fusion, explained token by token.</h1>
         <p class="hero-copy">
-          This view merges analyzer outputs into one decision stream, then shows the winning value,
-          supporting evidence, confidence, and conflicts that deserve review.
+          This view routes each linguistic feature to eligible analyzers, preserves the selected source,
+          and exposes supporting evidence, confidence, and conflicts for token-level inspection.
         </p>
       </div>
       <div class="tool-legend" aria-label="Tool color legend">
@@ -60,7 +60,7 @@
           <strong>{{ fusionResult.length }}</strong>
         </div>
         <div class="summary-item">
-          <span class="summary-label">Active tools</span>
+          <span class="summary-label">Participating tools</span>
           <strong class="tool-list">{{ activeToolsLabel }}</strong>
         </div>
         <div class="summary-item">
@@ -73,44 +73,28 @@
         </div>
       </section>
 
-      <section class="analysis-visual-grid">
+      <section class="fusion-method-grid">
+        <article class="panel panel-pad decision-policy">
+          <span class="feature-label">Decision policy</span>
+          <h2>Capability first, evidence second.</h2>
+          <p>Fusion does not use blind majority voting. Each feature is routed to eligible experts, aligned candidate evidence is inspected, and the selected source is preserved in the token trace.</p>
+          <div class="role-grid">
+            <div v-for="role in expertRoles" :key="role.role" class="role-card">
+              <strong>{{ role.role }}</strong><span>{{ role.tools }}</span><small>{{ role.features }}</small>
+            </div>
+          </div>
+        </article>
         <ScientificChart
           type="line"
-          title="Fusion Confidence"
-          subtitle="Confidence score for each token."
-          badge="Confidence"
+          title="Fusion Confidence by Token"
+          subtitle="Reported confidence for each fused token; confidence is not a correctness score."
+          badge="Token trace"
           :labels="confidenceTimeline.labels"
           :datasets="confidenceTimeline.datasets"
-          :height="260"
-          aria-label="Fusion confidence chart"
-          empty-title="No confidence timeline"
-          empty-text="The fusion payload did not include confidence scores."
-        />
-
-        <ScientificChart
-          type="bar"
-          title="Conflict Severity"
-          subtitle="High, medium, and low conflict counts."
-          badge="Conflicts"
-          :labels="conflictSeverityChart.labels"
-          :datasets="conflictSeverityChart.datasets"
-          :height="260"
-          aria-label="Conflict severity chart"
-          empty-title="No conflict severity data"
-          empty-text="No conflict information was returned for this fusion run."
-        />
-
-        <ScientificChart
-          type="bar"
-          title="Contribution Chart"
-          subtitle="Evidence field counts by tool."
-          badge="Tools"
-          :labels="toolContributionChart.labels"
-          :datasets="toolContributionChart.datasets"
-          :height="260"
-          aria-label="Tool contribution chart"
-          empty-title="No contribution data"
-          empty-text="Contribution counts require a successful fusion response."
+          :height="300"
+          aria-label="Fusion confidence by token"
+          empty-title="No confidence trace"
+          empty-text="The fusion payload did not include token confidence scores."
         />
       </section>
 
@@ -124,7 +108,7 @@
           <header class="token-header">
             <div>
               <div class="token-word arabic-word">{{ token.word }}</div>
-              <div class="token-meta">Winning value source map and conflict trace</div>
+              <div class="token-meta">Selected source map and conflict trace</div>
             </div>
             <ConfidenceBadge :level="token.final.confidence_level" :score="token.final.confidence_score" />
           </header>
@@ -217,6 +201,51 @@
             </div>
           </div>
 
+          <section class="candidate-evidence-panel">
+            <div class="candidate-panel-head">
+              <div>
+                <span class="feature-label">Eligible analyzer evidence</span>
+                <p>Returned candidate values from feature-eligible tools. These values are evidence, not votes.</p>
+              </div>
+              <span class="candidate-note">selected source stays backend-defined</span>
+            </div>
+
+            <div class="candidate-feature-grid">
+              <article
+                v-for="feature in candidateFeatures"
+                :key="`${idx}-${feature}`"
+                class="candidate-feature-card"
+              >
+                <header>
+                  <strong>{{ featureLabel(feature) }}</strong>
+                  <ToolBadge :tool="sourceFor(token, feature, '')" />
+                </header>
+
+                <div v-if="candidateEvidence(idx, feature).length" class="candidate-list">
+                  <div
+                    v-for="item in candidateEvidence(idx, feature)"
+                    :key="`${idx}-${feature}-${item.tool}`"
+                    class="candidate-row"
+                    :class="{ selected: sourceFor(token, feature, '') === item.tool }"
+                  >
+                    <ToolBadge :tool="item.tool" />
+                    <span
+                      class="candidate-value"
+                      :class="{ arabic: ['lemma', 'root', 'segmentation'].includes(feature) }"
+                      :dir="['lemma', 'root', 'segmentation'].includes(feature) ? 'rtl' : null"
+                      :lang="['lemma', 'root', 'segmentation'].includes(feature) ? 'ar' : null"
+                    >
+                      {{ item.value }}
+                    </span>
+                    <span v-if="sourceFor(token, feature, '') === item.tool" class="selected-chip">selected</span>
+                  </div>
+                </div>
+
+                <EmptyCell v-else label="No returned candidate evidence" />
+              </article>
+            </div>
+          </section>
+
           <section class="decision-trace">
             <button class="trace-toggle btn-ghost" type="button" @click="toggleTrace(idx)">
               {{ showTrace[idx] ? 'Hide decision trace' : 'Show decision trace' }}
@@ -234,8 +263,8 @@
 
           <section v-if="token.conflicts.length" class="conflicts-section">
             <div class="conflicts-header">
-              <span class="conflict-badge">Conflict</span>
-              <span>{{ token.conflicts.length }} items need review</span>
+              <span class="disagreement-badge">Disagreement</span>
+              <span>{{ token.conflicts.length }} items to inspect</span>
             </div>
             <div v-for="(conflict, cidx) in token.conflicts" :key="`${idx}-conf-${cidx}`" class="conflict-item">
               <span class="conflict-feature-name">{{ featureLabel(conflict.feature) }}</span>
@@ -250,7 +279,7 @@
       </section>
 
       <section v-if="contributionGroups.length" class="section-card contribution-section">
-        <h2 class="section-title">Contribution summary</h2>
+        <h2 class="section-title">Observed contribution in this run</h2>
         <div class="contribution-grid">
           <article v-for="group in contributionGroups" :key="group.key" class="contrib-card" :class="`group-${group.key}`">
             <div class="contrib-head">
@@ -289,10 +318,12 @@ const error = ref('')
 const fusionResult = ref(null)
 const activeTools = ref([])
 const showTrace = ref({})
+const candidateFeatures = ['lemma', 'root', 'pos', 'segmentation']
 const lastDuration = ref(0)
+const analyzerEvidence = ref({})
 
 const visibleToolColors = computed(() =>
-  Object.fromEntries(Object.entries(TOOL_COLORS).filter(([tool]) => ['camel', 'stanza', 'farasa', 'alkhalil', 'udpipe', 'qalsadi'].includes(tool))),
+  Object.fromEntries(Object.entries(TOOL_COLORS).filter(([tool]) => ['camel', 'sinatools', 'stanza', 'farasa', 'alkhalil', 'udpipe', 'qalsadi'].includes(tool))),
 )
 
 const EXAMPLE_SENTENCES = [
@@ -300,6 +331,13 @@ const EXAMPLE_SENTENCES = [
   'وجدت المعلمة طالبة مجتهدة في الفصل',
   'يكتب الصحفي المقالة كل يوم',
 ]
+const expertRoles = [
+  { role: 'Segmentation anchor', tools: 'Farasa', features: 'Clitic and segment boundaries' },
+  { role: 'Lexical / morphology experts', tools: 'CAMeL / SinaTools', features: 'Lemma, POS, root, and lexical morphology evidence' },
+  { role: 'Syntax experts', tools: 'Stanza / UDPipe', features: 'UD POS and dependency evidence' },
+  { role: 'Supporting analyzers', tools: 'Qalsadi / AlKhalil', features: 'Rule-based lexical and morphological signals' },
+]
+
 
 const POS_AR = {
   VERB: 'Verb',
@@ -348,8 +386,8 @@ const FEATURE_SOURCE_EXPLANATION = {
   segmentation: 'Farasa provides segmentation evidence.',
 }
 
-const activeToolCount = computed(() => activeTools.value.length || 6)
-const activeToolsLabel = computed(() => (activeTools.value.length ? activeTools.value.join(' / ') : 'CAMeL / Stanza / Farasa / Qalsadi'))
+const activeToolCount = computed(() => activeTools.value.length)
+const activeToolsLabel = computed(() => (activeTools.value.length ? activeTools.value.join(' / ') : 'No participating tools reported'))
 const totalConflicts = computed(() => fusionResult.value?.reduce((sum, token) => sum + token.conflicts.length, 0) || 0)
 const averageConfidenceLabel = computed(() => {
   if (!fusionResult.value?.length) return '0%'
@@ -452,7 +490,12 @@ async function runSmartAnalysis() {
 
   try {
     const started = performance.now()
-    const { data } = await axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } })
+    const [fusionResponse, combinedResponse] = await Promise.all([
+      axios.get(`${API_BASE_URL}/fusion`, { params: { text: inputText.value } }),
+      axios.get(`${API_BASE_URL}/analyze-combined`, { params: { text: inputText.value } }).catch(() => ({ data: null })),
+    ])
+    const data = fusionResponse.data
+    analyzerEvidence.value = combinedResponse.data?.tools || combinedResponse.data?.combined?.tools || combinedResponse.data?.combined || {}
     lastDuration.value = Math.round(performance.now() - started)
     const normalized = normalizeFusionRows(data)
     fusionResult.value = normalized.rows
@@ -523,6 +566,35 @@ function traceRows(token) {
     value: displayValue(token.final?.[feature]),
     explanation: FEATURE_SOURCE_EXPLANATION[feature] || 'This value was selected from the strongest available source.',
   }))
+}
+
+const FUSION_ELIGIBILITY = {
+  lemma: ['camel', 'sinatools', 'alkhalil', 'stanza', 'udpipe', 'qalsadi'],
+  root: ['camel', 'sinatools', 'alkhalil'],
+  pos: ['camel', 'sinatools', 'alkhalil', 'stanza', 'udpipe'],
+  segmentation: ['farasa'],
+}
+
+function candidateEvidence(tokenIndex, feature) {
+  return (FUSION_ELIGIBILITY[feature] || []).flatMap((tool) => {
+    const payload = analyzerEvidence.value?.[tool]
+    const token = Array.isArray(payload?.tokens) ? payload.tokens[tokenIndex] : null
+    if (!token) return []
+
+    const analysis = Array.isArray(token.analyses) && token.analyses.length ? token.analyses[0] : token
+    let value = ''
+
+    if (feature === 'pos') {
+      value = analysis?.pos || analysis?.upos || token?.pos || token?.upos || ''
+    } else if (feature === 'segmentation') {
+      const segmentation = analysis?.segmentation || token?.segmentation || token?.segments || token?.parts
+      value = Array.isArray(segmentation) ? segmentation.join(' + ') : segmentation
+    } else {
+      value = analysis?.[feature] || token?.[feature] || ''
+    }
+
+    return hasValue(value) ? [{ tool, value: String(value) }] : []
+  })
 }
 
 function sourceFor(token, feature, fallback) {
@@ -1065,7 +1137,24 @@ function voiceLabel(value) {
   font-weight: 500;
 }
 
+.research-method-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr);
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+.method-copy h2 { margin: 6px 0 10px; font-size: clamp(1.15rem, 2vw, 1.55rem); }
+.method-copy p { margin: 0; color: var(--c-text-secondary); line-height: 1.7; }
+.expert-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.expert-role { display: grid; gap: 5px; padding: 14px; border: 1px solid var(--c-border); border-radius: var(--radius-control); background: var(--c-bg-subtle, #f8fafc); }
+.expert-role-label { color: var(--c-text-secondary); font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; }
+.expert-role small { color: var(--c-text-secondary); line-height: 1.45; }
+
 @media (max-width: 860px) {
+  .research-method-panel { grid-template-columns: 1fr; }
   .smart-hero,
   .input-row {
     grid-template-columns: 1fr;
@@ -1086,8 +1175,366 @@ function voiceLabel(value) {
 }
 
 @media (max-width: 560px) {
+  .expert-map { grid-template-columns: 1fr; }
+  .research-method-panel { padding: 16px; }
   .tokens-grid {
     grid-template-columns: 1fr;
   }
 }
+
+.fusion-method-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.decision-policy h2{margin:6px 0 8px}.decision-policy p{color:var(--c-text-secondary);line-height:1.7}.role-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px}.role-card{display:grid;gap:3px;padding:12px;border:1px solid var(--c-border);border-radius:8px;background:var(--c-page-bg)}.role-card span{color:var(--c-accent-text);font-size:13px}.role-card small{color:var(--c-text-secondary);line-height:1.5}@media(max-width:900px){.fusion-method-grid{grid-template-columns:1fr}.role-grid{grid-template-columns:1fr}}
+
+.candidate-evidence{margin-top:14px;padding:13px;border:1px solid var(--c-border);border-radius:10px;background:var(--c-page-bg)}
+.candidate-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}
+.candidate-head small{max-width:460px;color:var(--c-text-secondary);text-align:right;line-height:1.45}
+.candidate-feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.candidate-feature{min-width:0;padding:10px;border:1px solid var(--c-border);border-radius:8px;background:var(--c-surface)}
+.candidate-feature>strong{display:block;margin-bottom:8px;font-size:12px}
+.candidate-list{display:grid;gap:6px}.candidate-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:7px;align-items:center;min-width:0}
+.candidate-row>span:nth-child(2){overflow-wrap:anywhere}.selected-mark{color:var(--c-agreement-text);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+@media(max-width:760px){.candidate-head{flex-direction:column}.candidate-head small{text-align:left}.candidate-feature-grid{grid-template-columns:1fr}}
+
+/* FINAL FUSION RESEARCH PASS */
+.smart-page {
+  width: min(96vw, 1500px);
+}
+
+.smart-hero {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.tool-legend {
+  margin-top: 18px;
+  justify-content: flex-start;
+  max-width: 100%;
+}
+
+.analyze-btn {
+  background: var(--c-accent);
+  box-shadow: none;
+}
+
+.summary-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.summary-item {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+
+.conflict-count {
+  color: #7a5a2e !important;
+}
+
+.fusion-method-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr);
+  gap: 16px;
+}
+
+.role-card {
+  border-left: 3px solid var(--c-accent);
+  background: #f8fafc;
+}
+
+.tokens-grid {
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: 18px;
+}
+
+.token-card {
+  border-radius: var(--radius-card);
+  border-color: #d9e2ec;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .04);
+}
+
+.token-card.has-conflicts {
+  border-color: #c9a46a;
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf2 135%);
+}
+
+.token-header {
+  border-bottom-color: var(--c-border);
+}
+
+.token-word {
+  font-size: 26px;
+}
+
+.features-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.feature-item {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #eef2f6;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.feature-item.full-width {
+  grid-column: 1 / -1;
+}
+
+.feature-label,
+.feature-label-row .feature-label {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.feature-value,
+.gloss-value,
+.dep-head {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.pos-badge {
+  border-color: #c9d8e6;
+  background: #eef4f9;
+  color: #244a73;
+}
+
+.root-type-badge,
+.morph-pill,
+.seg-pill,
+.dep-rel {
+  border: 1px solid #d9e2ec;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.stanza-pill,
+.dep-rel {
+  color: #365f56;
+  background: #f0f7f4;
+  border-color: #c9dfd8;
+}
+
+/* Candidate evidence */
+.candidate-evidence-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.candidate-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.candidate-panel-head p {
+  margin: 3px 0 0;
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.candidate-note {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid #d9e2ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.candidate-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.candidate-feature-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.candidate-feature-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.candidate-feature-card header strong {
+  color: var(--c-text-primary);
+  font-size: 12px;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 6px;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.candidate-row.selected {
+  border-color: #b8d3c8;
+  background: #f0f7f4;
+}
+
+.candidate-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--c-text-primary);
+}
+
+.candidate-value.arabic {
+  text-align: right;
+  font-size: 14px;
+}
+
+.selected-chip {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #365f56;
+  border: 1px solid #b8d3c8;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* Decision trace and disagreements */
+.decision-trace {
+  border-top-color: var(--c-border);
+}
+
+.trace-row {
+  display: grid;
+  grid-template-columns: 92px auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.trace-support {
+  grid-column: 1 / -1;
+  padding-left: 0;
+  line-height: 1.5;
+}
+
+.conflicts-section {
+  border-color: #d9c28f;
+  background: #fffaf2;
+}
+
+.conflicts-header {
+  color: #7a5a2e;
+}
+
+.disagreement-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1e5ca;
+  color: #7a5a2e;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.conflict-item {
+  padding: 8px;
+  border: 1px solid #ead9b7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.conflict-feature-name {
+  color: #7a5a2e;
+}
+
+.conf-val {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vs-sep {
+  color: #7a5a2e;
+}
+
+.contribution-section {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+}
+
+.contrib-card {
+  background: #f8fafc;
+}
+
+@media (max-width: 1050px) {
+  .smart-page {
+    width: min(100% - 24px, 1240px);
+  }
+
+  .summary-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fusion-method-grid,
+  .features-grid,
+  .candidate-feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tokens-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .summary-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-panel-head {
+    flex-direction: column;
+  }
+
+  .trace-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 </style>

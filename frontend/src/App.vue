@@ -2,21 +2,24 @@
   <div id="app" class="platform-shell">
     <header class="platform-header">
       <div class="header-inner">
-        <RouterLink to="/" class="header-brand" aria-label="Comparative Arabic NLP Platform home">
+        <RouterLink to="/" class="header-brand" aria-label="Arabic NLP Research Platform home">
           <span class="brand-icon">A</span>
           <div>
-            <div class="brand-title">Comparative Arabic NLP Platform</div>
-            <div class="brand-sub">Unified analysis, comparison, fusion, and evaluation</div>
+            <div class="brand-title">Arabic NLP Research Platform</div>
+            <div class="brand-sub">Evidence · fusion · capability-aware evaluation</div>
           </div>
         </RouterLink>
 
-        <nav class="header-nav" aria-label="Primary navigation">
-          <RouterLink to="/" class="nav-item">Dashboard</RouterLink>
-          <RouterLink to="/analyze" class="nav-item">Analyze</RouterLink>
-          <RouterLink to="/smart" class="nav-item nav-item--featured">Fusion</RouterLink>
-          <RouterLink to="/compare" class="nav-item">Compare</RouterLink>
-          <RouterLink to="/evaluate" class="nav-item">Evaluation</RouterLink>
-          <RouterLink to="/reports" class="nav-item">Reports</RouterLink>
+        <button class="nav-toggle" type="button" :aria-expanded="navOpen" aria-label="Toggle navigation" @click="navOpen = !navOpen">
+          <span></span><span></span><span></span>
+        </button>
+        <nav :class="['header-nav', { open: navOpen }]" aria-label="Primary navigation">
+          <RouterLink to="/" class="nav-item" @click="navOpen = false">Overview</RouterLink>
+          <RouterLink to="/analyze" class="nav-item" @click="navOpen = false">Analyze</RouterLink>
+          <RouterLink to="/smart" class="nav-item nav-item--featured" @click="navOpen = false">Fusion</RouterLink>
+          <RouterLink to="/compare" class="nav-item" @click="navOpen = false">Compare</RouterLink>
+          <RouterLink to="/evaluate" class="nav-item" @click="navOpen = false">Evaluation</RouterLink>
+          <RouterLink to="/reports" class="nav-item" @click="navOpen = false">Methodology</RouterLink>
         </nav>
       </div>
     </header>
@@ -31,13 +34,19 @@
 
     <footer class="platform-footer">
       <div>
-        <strong>Comparative Arabic NLP Platform</strong>
-        <span>CAMeL, Farasa, Stanza, Qalsadi, UDPipe, and AlKhalil workbench.</span>
+        <strong>Arabic NLP Research Platform</strong>
+        <span>Comparative analyzer evidence, alignment, expert fusion, and capability-aware evaluation.</span>
       </div>
-      <span class="footer-tag">Research dashboard</span>
+      <span class="footer-tag">Arabic NLP research workbench</span>
     </footer>
   </div>
 </template>
+
+<script setup>
+import { ref } from 'vue'
+
+const navOpen = ref(false)
+</script>
 
 <style>
 .platform-shell {
@@ -62,16 +71,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
 }
 
 .header-brand {
-  min-width: 260px;
+  min-width: 210px;
   display: inline-flex;
   align-items: center;
   gap: 12px;
   color: #fff;
   text-decoration: none;
+  padding: 0 10px;
 }
 
 .brand-icon {
@@ -81,7 +91,7 @@
   place-items: center;
   border-radius: 14px;
   color: white;
-  background: linear-gradient(135deg, var(--cyan), var(--c-accent));
+  background: var(--c-accent);
   box-shadow: 0 12px 28px rgba(22, 54, 92, 0.28);
   font-size: 18px;
   font-weight: 700;
@@ -108,7 +118,7 @@
 .header-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
@@ -117,14 +127,14 @@
 }
 
 .nav-item {
-  min-width: 88px;
-  min-height: 38px;
+  min-width: auto;
+  min-height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 10px;
   color: rgba(255, 255, 255, 0.76);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
 }
@@ -229,4 +239,47 @@
     flex-direction: column;
   }
 }
+
+@media (max-width: 980px) {
+  .platform-header { position: sticky; }
+  .header-inner {
+    width: min(100% - 24px, 1360px);
+    min-height: auto;
+    padding: 12px 0 10px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .header-brand { min-width: 0; }
+  .brand-sub { display: none; }
+  .header-nav {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+  .nav-item { flex: 0 0 auto; white-space: nowrap; }
+}
+
+@media (max-width: 560px) {
+  .brand-icon { width: 38px; height: 38px; border-radius: 10px; }
+  .brand-title { font-size: .9rem; }
+  .nav-item { padding: 8px 10px; font-size: .78rem; }
+  .platform-footer { align-items: flex-start; flex-direction: column; gap: 10px; }
+}
+
+
+.nav-toggle{display:none;width:40px;height:40px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:rgba(255,255,255,.06);padding:9px;cursor:pointer}
+.nav-toggle span{display:block;height:2px;margin:4px 0;background:#fff;border-radius:2px}
+@media(max-width:1100px){
+  .header-inner{position:relative;flex-direction:row;align-items:center;padding:9px 0}
+  .brand-sub{display:none}
+  .nav-toggle{display:block;margin-left:auto}
+  .header-nav{display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:50;width:100%;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:10px;background:#334155;border:1px solid rgba(255,255,255,.14);box-shadow:0 14px 28px rgba(15,23,42,.24);overflow:visible}
+  .header-nav.open{display:grid}
+  .nav-item{width:100%;min-width:0;justify-content:flex-start;padding:9px 11px;white-space:normal}
+}
+@media(max-width:560px){.header-nav{grid-template-columns:1fr}.brand-title{font-size:.82rem}}
 </style>

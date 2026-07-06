@@ -45,15 +45,15 @@ let chartInstance = null
 const hasData = computed(() => props.labels.length > 0 && props.datasets.some((dataset) => Array.isArray(dataset.data) && dataset.data.length))
 
 function palette(index) {
+  // Restrained research palette. Semantic status colors should be supplied
+  // explicitly by the calling view rather than inferred from dataset order.
   const colors = [
-    '#4F46E5',
-    '#14B8A6',
-    '#D97706',
-    '#7C3AED',
-    '#0EA5E9',
-    '#22C55E',
-    '#F97316',
-    '#EF4444',
+    '#315C8C',
+    '#5B6F8A',
+    '#5F7F78',
+    '#7A6F8F',
+    '#8A7357',
+    '#64748B',
   ]
   return colors[index % colors.length]
 }
@@ -74,9 +74,9 @@ function buildChart() {
         const fillColor = dataset.backgroundColor || `${color}22`
         return {
           borderWidth: 2,
-          tension: 0.35,
-          pointRadius: 3,
-          pointHoverRadius: 5,
+          tension: 0.22,
+          pointRadius: 2,
+          pointHoverRadius: 4,
           ...dataset,
           borderColor: color,
           backgroundColor: fillColor,

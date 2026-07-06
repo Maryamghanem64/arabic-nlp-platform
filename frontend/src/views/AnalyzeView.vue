@@ -3,11 +3,10 @@
     <section class="hero-band analyze-hero">
 
       <div class="hero-content">
-        <span class="eyebrow">Single tool deep analysis</span>
-        <h1 class="hero-title">Select any tool, or run the combined backend path.</h1>
+        <span class="eyebrow">Analyzer evidence laboratory</span>
+        <h1 class="hero-title">Inspect structured Arabic NLP evidence at token level.</h1>
         <p class="hero-copy">
-          Tool availability comes from <code>GET /</code>. Selecting a single active tool calls
-          <code>/analyze/{tool}</code>, while All tools calls <code>/analyze-combined</code>.
+          Run one analyzer for a capability-focused inspection or execute the combined path. Results preserve analyzer evidence and expose missing fields without inventing values.
         </p>
       </div>
     </section>
@@ -97,6 +96,24 @@
       </div>
     </section>
 
+    <section class="selected-capability-panel">
+      <div>
+        <span class="eyebrow">Selected analysis scope</span>
+        <h2>{{ selectedToolMeta.label }}</h2>
+        <p>{{ selectedCapability.description }}</p>
+      </div>
+      <div class="capability-tags">
+        <span v-for="feature in selectedCapability.features" :key="feature">{{ feature }}</span>
+      </div>
+    </section>
+
+    <section v-if="hasResults && !loading" class="analysis-summary-grid" aria-label="Analysis summary">
+      <article class="analysis-summary-card"><span>Tokens analyzed</span><strong>{{ currentRows.length }}</strong></article>
+      <article class="analysis-summary-card"><span>Analysis scope</span><strong>{{ selectedTool === 'all' ? 'Combined' : selectedToolMeta.label }}</strong></article>
+      <article class="analysis-summary-card"><span>Average confidence</span><strong>{{ averageConfidenceLabel }}</strong></article>
+      <article class="analysis-summary-card"><span>Absent expected evidence</span><strong>{{ missingEvidenceCount }}</strong></article>
+    </section>
+
     <section v-if="hasResults && !loading" class="analysis-visual-grid">
       <ScientificChart
         type="line"
@@ -123,44 +140,18 @@
         empty-title="No POS distribution"
         empty-text="The current result set does not include POS labels."
       />
-
-      <ScientificChart
-        type="doughnut"
-        title="Morphological Categories"
-        subtitle="Gender, number, and tense evidence returned by the analyzer."
-        badge="Morphology"
-        :labels="morphologyChart.labels"
-        :datasets="morphologyChart.datasets"
-        :height="260"
-        aria-label="Morphological categories chart"
-        empty-title="No morphology summary"
-        empty-text="The selected tool did not return enough morphology evidence."
-      />
     </section>
 
     <section v-if="hasResults && !loading" class="analysis-visual-grid analysis-visual-grid--wide">
       <HeatmapMatrix
-        title="Evidence Heatmap"
-        subtitle="Token-by-feature presence and confidence."
+        title="Expected Evidence Matrix"
+        subtitle="Presence of fields expected from the selected analyzer capability."
         badge="Matrix"
         :rows="heatmapRows"
         :cols="heatmapCols"
         :values="heatmapValues"
         empty-title="No evidence matrix"
         empty-text="The current run does not expose enough structured evidence to build a matrix."
-      />
-
-      <ScientificChart
-        type="bar"
-        title="Tool Evidence Mix"
-        subtitle="How many evidence fields each tool contributed."
-        badge="Tools"
-        :labels="toolContributionChart.labels"
-        :datasets="toolContributionChart.datasets"
-        :height="260"
-        aria-label="Tool contribution bar chart"
-        empty-title="No contribution data"
-        empty-text="Contribution counts will appear after a result set is available."
       />
     </section>
 
@@ -195,8 +186,19 @@
         </div>
 
         <div v-if="activeTab === 'results'" class="tab-panel">
-          <div v-if="selectedTool === 'all'" class="results-grid">
-            <article v-for="tool in toolOptions" :key="tool.key" class="section-card tool-result-card">
+          <div v-if="selectedTool === 'all'" class="capability-results">
+            <section v-for="section in groupedToolSections" :key="section.key" class="capability-group">
+              <div class="capability-group-head">
+                <div>
+                  <span class="feature-label">{{ section.kicker }}</span>
+                  <h3>{{ section.title }}</h3>
+                  <p>{{ section.description }}</p>
+                </div>
+                <span class="group-count">{{ section.tools.length }} analyzer{{ section.tools.length === 1 ? '' : 's' }}</span>
+              </div>
+
+              <div :class="['capability-tool-grid', section.layout]">
+                <article v-for="tool in section.tools" :key="tool.key" class="section-card tool-result-card">
               <div class="tool-result-head" :style="{ borderTopColor: tool.color }">
                 <div class="tool-result-title">
                   <span class="tool-result-bar" :style="{ backgroundColor: tool.color }"></span>
@@ -208,25 +210,44 @@
                 <span :class="['pill', statusPill(resultStatus(tool.key))]">{{ statusLabel(resultStatus(tool.key)) }}</span>
               </div>
 
-              <div v-if="isRenderableToolStatus(resultStatus(tool.key)) && toolRows(tool.key).length" class="table-scroll tool-table">
+              <div
+                v-if="isRenderableToolStatus(resultStatus(tool.key)) && toolRows(tool.key).length"
+                class="compact-evidence-table capability-specific-table"
+              >
                 <table>
                   <thead>
                     <tr>
                       <th>Token</th>
-                      <th v-for="field in toolColumns(tool.key)" :key="`${tool.key}-${field}`">{{ fieldLabel(field) }}</th>
-                      <th>Confidence</th>
+                      <th
+                        v-for="column in toolTableColumns(tool.key)"
+                        :key="`${tool.key}-header-${column.key}`"
+                      >
+                        {{ column.label }}
+                      </th>
                     </tr>
                   </thead>
+
                   <tbody>
-                    <tr v-for="row in toolRows(tool.key)" :key="`${tool.key}-${row.index}`">
-                      <td class="arabic" dir="rtl" lang="ar">{{ row.surface }}</td>
-                      <td v-for="field in toolColumns(tool.key)" :key="`${tool.key}-${row.index}-${field}`">
-                        <span :class="cellClass(field, row.values[field])" :dir="isArabicField(field) ? 'rtl' : null" :lang="isArabicField(field) ? 'ar' : null">
-                          {{ formatCellValue(field, row.values[field]) }}
-                        </span>
+                    <tr
+                      v-for="row in toolRows(tool.key)"
+                      :key="`${tool.key}-${row.index}`"
+                    >
+                      <td class="arabic token-cell" dir="rtl" lang="ar">
+                        {{ row.surface }}
                       </td>
-                      <td>
-                        <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || 'low' }}</span>
+
+                      <td
+                        v-for="column in toolTableColumns(tool.key)"
+                        :key="`${tool.key}-${row.index}-${column.key}`"
+                        :data-label="column.label"
+                      >
+                        <span
+                          :class="toolCellClass(tool.key, column.key, row)"
+                          :dir="toolCellDirection(column.key)"
+                          :lang="toolCellDirection(column.key) === 'rtl' ? 'ar' : null"
+                        >
+                          {{ toolCellValue(tool.key, column.key, row) }}
+                        </span>
                       </td>
                     </tr>
                   </tbody>
@@ -238,6 +259,9 @@
                 <p>{{ resultReason(tool.key) || 'The backend returned a safe unavailable response.' }}</p>
               </div>
             </article>
+
+              </div>
+            </section>
           </div>
 
           <article v-else class="section-card single-result-card">
@@ -252,25 +276,44 @@
               <span :class="['pill', statusPill(resultStatus(selectedTool))]">{{ statusLabel(resultStatus(selectedTool)) }}</span>
             </div>
 
-            <div v-if="isRenderableToolStatus(resultStatus(selectedTool)) && toolRows(selectedTool).length" class="table-scroll tool-table">
+            <div
+              v-if="isRenderableToolStatus(resultStatus(selectedTool)) && toolRows(selectedTool).length"
+              class="compact-evidence-table capability-specific-table"
+            >
               <table>
                 <thead>
                   <tr>
                     <th>Token</th>
-                    <th v-for="field in toolColumns(selectedTool)" :key="`${selectedTool}-${field}`">{{ fieldLabel(field) }}</th>
-                    <th>Confidence</th>
+                    <th
+                      v-for="column in toolTableColumns(selectedTool)"
+                      :key="`${selectedTool}-header-${column.key}`"
+                    >
+                      {{ column.label }}
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  <tr v-for="row in toolRows(selectedTool)" :key="`${selectedTool}-${row.index}`">
-                    <td class="arabic" dir="rtl" lang="ar">{{ row.surface }}</td>
-                    <td v-for="field in toolColumns(selectedTool)" :key="`${selectedTool}-${row.index}-${field}`">
-                      <span :class="cellClass(field, row.values[field])" :dir="isArabicField(field) ? 'rtl' : null" :lang="isArabicField(field) ? 'ar' : null">
-                        {{ formatCellValue(field, row.values[field]) }}
-                      </span>
+                  <tr
+                    v-for="row in toolRows(selectedTool)"
+                    :key="`${selectedTool}-${row.index}`"
+                  >
+                    <td class="arabic token-cell" dir="rtl" lang="ar">
+                      {{ row.surface }}
                     </td>
-                    <td>
-                      <span :class="['pill', confidencePill(row.confidence)]">{{ row.confidence || 'low' }}</span>
+
+                    <td
+                      v-for="column in toolTableColumns(selectedTool)"
+                      :key="`${selectedTool}-${row.index}-${column.key}`"
+                      :data-label="column.label"
+                    >
+                      <span
+                        :class="toolCellClass(selectedTool, column.key, row)"
+                        :dir="toolCellDirection(column.key)"
+                        :lang="toolCellDirection(column.key) === 'rtl' ? 'ar' : null"
+                      >
+                        {{ toolCellValue(selectedTool, column.key, row) }}
+                      </span>
                     </td>
                   </tr>
                 </tbody>
@@ -427,9 +470,80 @@ const toolOptions = computed(() =>
     ...TOOL_CONFIG[key],
   })),
 )
+const TOOL_SECTION_DEFS = [
+  {
+    key: 'morphology',
+    kicker: 'Morphology and lexical evidence',
+    title: 'Morphology / Lexical analyzers',
+    description: 'Lemma, root, POS, and morphological evidence. These analyzers are inspected as lexical-morphology evidence, not as syntax parsers.',
+    tools: ['camel', 'alkhalil', 'sinatools', 'madamira'],
+    layout: 'layout-morphology',
+  },
+  {
+    key: 'syntax',
+    kicker: 'Syntax and UD evidence',
+    title: 'Syntax / UD analyzers',
+    description: 'POS and dependency-oriented evidence from UD-style pipelines.',
+    tools: ['stanza', 'udpipe'],
+    layout: 'layout-syntax',
+  },
+  {
+    key: 'segmentation',
+    kicker: 'Segmentation and lightweight lexical support',
+    title: 'Segmentation / lexical support',
+    description: 'Segmentation anchor and rule-based lexical support are shown separately because their capabilities are not identical to full morphology analyzers.',
+    tools: ['farasa', 'qalsadi'],
+    layout: 'layout-support',
+  },
+  {
+    key: 'contextual',
+    kicker: 'Contextual evidence',
+    title: 'Contextual model output',
+    description: 'Contextual representation models are not treated as direct morphology-table competitors. Missing morphology fields are N/A, not analyzer failure.',
+    tools: ['arabert'],
+    layout: 'layout-contextual',
+  },
+]
+
+const groupedToolSections = computed(() =>
+  TOOL_SECTION_DEFS
+    .map((section) => ({
+      ...section,
+      tools: section.tools
+        .filter((key) => TOOL_CONFIG[key])
+        .map((key) => ({ key, ...TOOL_CONFIG[key] })),
+    }))
+    .filter((section) => section.tools.length > 0),
+)
+
 const toolStatusesLoaded = computed(() => Object.keys(toolStatuses.value).length > 0)
 const tokenEstimate = computed(() => (inputText.value.trim() ? inputText.value.trim().split(/\s+/).length : 0))
 const selectedToolMeta = computed(() => TOOL_CONFIG[selectedTool.value] || { label: 'All tools', color: 'var(--c-text-primary)', type: 'Combined analysis' })
+const TOOL_CAPABILITY_COPY = {
+  all: { description: 'Combined analyzer evidence with expert fusion available as a separate research view.', features: ['Cross-tool evidence', 'Fusion trace', 'Conflicts'] },
+  camel: { description: 'Strong lexical and morphological analysis for lemma, root, POS, and inflectional features.', features: ['Lemma', 'Root', 'Morphology', 'POS'] },
+  farasa: { description: 'Segmentation-focused evidence for Arabic clitic and token boundary analysis.', features: ['Segmentation', 'Clitic boundaries'] },
+  stanza: { description: 'UD-oriented contextual analysis with POS, lemma, morphology, and dependency parsing.', features: ['POS', 'Dependency', 'Lemma'] },
+  udpipe: { description: 'Universal Dependencies pipeline used for POS and dependency-oriented supporting evidence.', features: ['UD POS', 'Dependency'] },
+  qalsadi: { description: 'Lightweight Arabic lemmatization and rule-based supporting evidence.', features: ['Lemma support', 'Rule-based evidence'] },
+  alkhalil: { description: 'Rule-based Arabic morphological analysis used as supporting morphological evidence.', features: ['Morphology', 'Root support', 'Lemma support'] },
+  sinatools: { description: 'Lexical and lemma-oriented evidence when the local SinaTools resource is loaded.', features: ['Lemma', 'Lexical evidence'] },
+  arabert: { description: 'Contextual representation support; not treated as a direct morphology analyzer.', features: ['Contextual support', 'Embeddings'] },
+  madamira: { description: 'Context-sensitive morphological and disambiguation support when configured.', features: ['Morphology', 'Disambiguation'] },
+}
+const selectedCapability = computed(() => TOOL_CAPABILITY_COPY[selectedTool.value] || {
+  description: selectedToolMeta.value.type || 'Analyzer-specific evidence.',
+  features: TOOL_CONFIG[selectedTool.value]?.provides || [],
+})
+const averageConfidenceLabel = computed(() => {
+  const scores = currentRows.value.map((row) => Number(row.confidence)).filter(Number.isFinite)
+  return scores.length ? `${Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 100)}%` : 'N/A'
+})
+const missingEvidenceCount = computed(() => currentRows.value.reduce((count, row) => {
+  const values = Object.values(row.values || {})
+  return count + values.filter((value) => !hasTokenValue(value)).length
+}, 0))
+
 const hasResults = computed(() => Boolean(rawResults.value || fusionPayload.value))
 const jsonExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'json') : '#'))
 const csvExportHref = computed(() => (hasResults.value ? exportUrl(inputText.value, 'csv') : '#'))
@@ -544,6 +658,189 @@ const tabs = computed(() => [
   { key: 'json', label: 'JSON' },
 ])
 
+
+const TOOL_TABLE_COLUMNS = {
+  camel: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'root', label: 'Root' },
+    { key: 'pos', label: 'POS' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'number', label: 'Number' },
+    { key: 'tense', label: 'Tense' },
+    { key: 'confidence', label: 'Confidence', virtual: true },
+  ],
+  alkhalil: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'root', label: 'Root' },
+    { key: 'pos', label: 'POS' },
+    { key: 'confidence', label: 'Confidence', virtual: true },
+  ],
+  sinatools: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'pos', label: 'POS' },
+    { key: 'root', label: 'Root' },
+    { key: 'confidence', label: 'Confidence', virtual: true },
+  ],
+  madamira: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'pos', label: 'POS' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'number', label: 'Number' },
+    { key: 'tense', label: 'Tense' },
+    { key: 'case', label: 'Case' },
+    { key: 'confidence', label: 'Confidence', virtual: true },
+  ],
+  stanza: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'pos', label: 'UD POS' },
+    { key: 'dependency', label: 'Dependency' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'number', label: 'Number' },
+  ],
+  udpipe: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'pos', label: 'UD POS' },
+    { key: 'dependency', label: 'Dependency' },
+  ],
+  farasa: [
+    { key: 'segmentation', label: 'Segmentation' },
+    { key: 'evidence', label: 'Segmentation Evidence', virtual: true },
+  ],
+  qalsadi: [
+    { key: 'lemma', label: 'Lemma' },
+    { key: 'stem', label: 'Stem' },
+    { key: 'evidence', label: 'Lemmatization Evidence', virtual: true },
+  ],
+  arabert: [
+    { key: 'contextual', label: 'Contextual Output', virtual: true },
+    { key: 'evidence', label: 'Representation Status', virtual: true },
+  ],
+}
+
+function toolTableColumns(toolKey) {
+  return TOOL_TABLE_COLUMNS[toolKey] || []
+}
+
+function toolExpectedFields(toolKey) {
+  const expected = {
+    camel: ['lemma', 'root', 'pos'],
+    alkhalil: ['lemma', 'root'],
+    sinatools: ['lemma'],
+    madamira: ['lemma', 'pos'],
+    stanza: ['lemma', 'pos', 'dependency'],
+    udpipe: ['lemma', 'pos', 'dependency'],
+    farasa: ['segmentation'],
+    qalsadi: ['lemma'],
+    arabert: [],
+  }
+
+  return expected[toolKey] || []
+}
+
+function evidenceStatusForTool(toolKey, row) {
+  if (toolKey === 'arabert') {
+    return {
+      label: 'Contextual representation',
+      className: 'status-na',
+    }
+  }
+
+  const expected = toolExpectedFields(toolKey)
+
+  if (!expected.length) {
+    return {
+      label: 'Capability-specific output',
+      className: 'status-na',
+    }
+  }
+
+  const present = expected.filter((field) =>
+    hasTokenValue(row?.values?.[field]),
+  ).length
+
+  if (present === expected.length) {
+    return {
+      label: 'Expected evidence present',
+      className: 'evidence-complete',
+    }
+  }
+
+  if (present === 0) {
+    return {
+      label: 'Expected evidence absent',
+      className: 'evidence-missing',
+    }
+  }
+
+  return {
+    label: `Partial ${present}/${expected.length}`,
+    className: 'evidence-partial',
+  }
+}
+
+function toolCellValue(toolKey, field, row) {
+  if (field === 'confidence') {
+    return row.confidence || 'Not reported'
+  }
+
+  if (field === 'evidence') {
+    return evidenceStatusForTool(toolKey, row).label
+  }
+
+  if (field === 'contextual') {
+    const contextual =
+      row?.values?.embedding ||
+      row?.values?.contextual ||
+      row?.values?.representation ||
+      row?.values?.embedding_status
+
+    if (hasTokenValue(contextual)) {
+      if (typeof contextual === 'string') return contextual
+      return 'Contextual representation available'
+    }
+
+    return 'No direct morphology fields'
+  }
+
+  return displayTokenValue(field, row?.values?.[field])
+}
+
+function toolCellClass(toolKey, field, row) {
+  if (field === 'pos') return 'pos-compact'
+  if (field === 'confidence') return ['pill', confidencePill(row.confidence)]
+  if (field === 'evidence') {
+    return [
+      'evidence-status',
+      evidenceStatusForTool(toolKey, row).className,
+    ]
+  }
+  if (['lemma', 'root', 'stem', 'segmentation'].includes(field)) {
+    return 'arabic-value compact-primary-value'
+  }
+  if (field === 'dependency') return 'dependency-value'
+  if (field === 'contextual') return 'contextual-value'
+  return 'compact-secondary'
+}
+
+function toolCellDirection(field) {
+  if (['lemma', 'root', 'stem', 'segmentation'].includes(field)) return 'rtl'
+  return null
+}
+
+function evidenceStatus(row) {
+  if (selectedTool.value === 'arabert') {
+    return { label: 'Contextual output', className: 'status-na' }
+  }
+  const expected = selectedTool.value === 'all'
+    ? Object.keys(row.values || {})
+    : (TOOL_CONFIG[selectedTool.value]?.provides || [])
+  if (!expected.length) return { label: 'N/A for direct fields', className: 'status-na' }
+  const present = expected.filter((field) => hasTokenValue(row.values?.[field])).length
+  if (present === expected.length) return { label: 'Expected evidence present', className: 'evidence-complete' }
+  if (present === 0) return { label: 'Expected evidence absent', className: 'evidence-missing' }
+  return { label: `Partial ${present}/${expected.length}`, className: 'evidence-partial' }
+}
+
 function selectTool(toolKey) {
   selectionNotice.value = null
   pendingTool.value = ''
@@ -630,12 +927,18 @@ async function loadFusion() {
 function toolRows(toolKey) {
   const payload = toolPayloadForKey(toolKey)
   const tokens = Array.isArray(payload?.tokens) ? payload.tokens : []
+  const fields = toolTableColumns(toolKey)
+    .filter((column) => !column.virtual)
+    .map((column) => column.key)
+
   return tokens.map((token, index) => {
     const best = canonicalToken(token)
     const values = {}
-    for (const field of TOOL_CONFIG[toolKey].provides) {
+
+    for (const field of fields) {
       values[field] = readField(best, field)
     }
+
     return {
       index,
       surface: token.surface || token.word || `#${index + 1}`,
@@ -757,6 +1060,26 @@ function readField(raw, field) {
   }
 
   return raw[field] || ''
+}
+
+
+function compactValue(row, field) {
+  return displayTokenValue(field, row?.values?.[field])
+}
+
+function compactRootOrSeg(row) {
+  if (hasTokenValue(row?.values?.root)) return displayTokenValue('root', row.values.root)
+  if (hasTokenValue(row?.values?.segmentation)) return displayTokenValue('segmentation', row.values.segmentation)
+  if (hasTokenValue(row?.values?.dependency)) return displayTokenValue('dependency', row.values.dependency)
+  return 'N/A'
+}
+
+function compactRootIsArabic(row) {
+  return hasTokenValue(row?.values?.root) || hasTokenValue(row?.values?.segmentation)
+}
+
+function compactRootClass(row) {
+  return compactRootIsArabic(row) ? 'arabic-value compact-secondary' : 'compact-secondary'
 }
 
 function fieldLabel(field) {
@@ -955,6 +1278,10 @@ function captureRunSummary() {
 </script>
 
 <style scoped>
+.analyze-page {
+  width: min(96vw, 1500px);
+}
+
 .analyze-hero {
   min-height: 250px;
 }
@@ -1305,7 +1632,32 @@ function captureRunSummary() {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.selected-capability-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--c-border);
+  border-left: 4px solid var(--c-accent);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+.selected-capability-panel h2 { margin: 5px 0 7px; font-size: 1.15rem; }
+.selected-capability-panel p { margin: 0; color: var(--c-text-secondary); line-height: 1.55; max-width: 760px; }
+.capability-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.capability-tags span { padding: 6px 9px; border-radius: 999px; background: var(--c-accent-light); color: var(--c-accent); font-size: .76rem; font-weight: 700; }
+.analysis-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.analysis-summary-card { display: grid; gap: 6px; padding: 15px; border: 1px solid var(--c-border); border-radius: var(--radius-card); background: var(--c-surface); }
+.analysis-summary-card span { color: var(--c-text-secondary); font-size: .78rem; }
+.analysis-summary-card strong { font-size: 1.2rem; }
+.evidence-status { display: inline-flex; padding: 5px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.evidence-complete { color: #166534; background: #dcfce7; }
+.evidence-partial { color: #92400e; background: #fef3c7; }
+.evidence-missing { color: #64748b; background: #f1f5f9; }
+
 @media (max-width: 1100px) {
+  .analysis-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .selector-grid,
   .results-grid,
   .evaluation-grid,
@@ -1316,6 +1668,9 @@ function captureRunSummary() {
 }
 
 @media (max-width: 720px) {
+  .selected-capability-panel { align-items: flex-start; flex-direction: column; }
+  .capability-tags { justify-content: flex-start; }
+  .analysis-summary-grid { grid-template-columns: 1fr 1fr; }
   .selector-grid,
   .results-grid,
   .evaluation-grid,
@@ -1328,6 +1683,425 @@ function captureRunSummary() {
     align-items: flex-start;
   }
 }
+
+
+.compact-evidence-table {
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  background: var(--c-surface);
+}
+
+.compact-evidence-table table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.compact-evidence-table th,
+.compact-evidence-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f6;
+  vertical-align: middle;
+}
+
+.compact-evidence-table th {
+  position: static;
+  background: var(--c-page-bg);
+  color: var(--c-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.compact-evidence-table th:nth-child(1) { width: 18%; }
+.compact-evidence-table th:nth-child(2) { width: 18%; }
+.compact-evidence-table th:nth-child(3) { width: 12%; }
+.compact-evidence-table th:nth-child(4) { width: 22%; }
+.compact-evidence-table th:nth-child(5) { width: 18%; }
+.compact-evidence-table th:nth-child(6) { width: 12%; }
+
+.compact-evidence-table td {
+  color: var(--c-text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.token-cell {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pos-compact {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.compact-secondary {
+  color: var(--c-text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .compact-evidence-table table,
+  .compact-evidence-table thead,
+  .compact-evidence-table tbody,
+  .compact-evidence-table tr,
+  .compact-evidence-table th,
+  .compact-evidence-table td {
+    display: block;
+  }
+
+  .compact-evidence-table thead {
+    display: none;
+  }
+
+  .compact-evidence-table tr {
+    padding: 12px;
+    border-bottom: 1px solid var(--c-border);
+  }
+
+  .compact-evidence-table td {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 0;
+  }
+
+  .compact-evidence-table td::before {
+    color: var(--c-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .compact-evidence-table td:nth-child(1)::before { content: "Token"; }
+  .compact-evidence-table td:nth-child(2)::before { content: "Lemma"; }
+  .compact-evidence-table td:nth-child(3)::before { content: "POS"; }
+  .compact-evidence-table td:nth-child(4)::before { content: "Root / Seg"; }
+  .compact-evidence-table td:nth-child(5)::before { content: "Evidence"; }
+  .compact-evidence-table td:nth-child(6)::before { content: "Confidence"; }
+}
+
+
+.capability-results {
+  display: grid;
+  gap: 22px;
+}
+
+.capability-group {
+  display: grid;
+  gap: 12px;
+}
+
+.capability-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-border);
+  border-left: 4px solid var(--c-accent);
+  border-radius: var(--radius-card);
+  background: var(--c-page-bg);
+}
+
+.capability-group-head h3 {
+  margin: 4px 0 4px;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.capability-group-head p {
+  max-width: 880px;
+  margin: 0;
+  color: var(--c-text-secondary);
+  line-height: 1.55;
+}
+
+.group-count {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.capability-tool-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.capability-tool-grid.layout-morphology {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.capability-tool-grid.layout-syntax,
+.capability-tool-grid.layout-support {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.capability-tool-grid.layout-contextual {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.capability-tool-grid.layout-contextual .tool-result-card {
+  max-width: 760px;
+}
+
+.compact-evidence-table th {
+  font-size: 11px;
+}
+
+.compact-evidence-table td {
+  font-size: 13.5px;
+}
+
+.compact-evidence-table th,
+.compact-evidence-table td {
+  padding: 11px 13px;
+}
+
+.token-cell {
+  font-size: 16px;
+}
+
+@media (min-width: 1350px) {
+  .capability-tool-grid.layout-morphology {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .capability-tool-grid.layout-syntax,
+  .capability-tool-grid.layout-support {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .analyze-page {
+    width: min(100% - 28px, 1240px);
+  }
+
+  .capability-tool-grid.layout-morphology,
+  .capability-tool-grid.layout-syntax,
+  .capability-tool-grid.layout-support,
+  .capability-tool-grid.layout-contextual {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-group-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+
+/* FINAL ANALYZE RESEARCH LAYOUT */
+.analyze-page {
+  width: min(94vw, 1380px);
+}
+
+.capability-results {
+  gap: 28px;
+}
+
+.capability-group {
+  gap: 12px;
+}
+
+.capability-group-head {
+  padding: 14px 18px;
+  align-items: center;
+}
+
+.capability-group-head h3 {
+  font-size: 1.08rem;
+}
+
+.capability-group-head p {
+  max-width: 920px;
+  font-size: .84rem;
+}
+
+.capability-tool-grid,
+.capability-tool-grid.layout-morphology,
+.capability-tool-grid.layout-syntax,
+.capability-tool-grid.layout-support {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: start;
+}
+
+.capability-tool-grid.layout-contextual {
+  grid-template-columns: 1fr !important;
+}
+
+.capability-tool-grid.layout-contextual .tool-result-card {
+  max-width: none;
+}
+
+.tool-result-card {
+  align-self: start;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.tool-result-card .tool-card-header {
+  min-height: 58px;
+}
+
+.compact-evidence-table {
+  width: 100%;
+}
+
+.compact-evidence-table table {
+  table-layout: auto;
+}
+
+.compact-evidence-table th,
+.compact-evidence-table td {
+  padding: 10px 9px;
+}
+
+.compact-evidence-table th {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.compact-evidence-table td {
+  font-size: 12.5px;
+}
+
+.compact-evidence-table th:nth-child(1),
+.compact-evidence-table th:nth-child(2),
+.compact-evidence-table th:nth-child(3),
+.compact-evidence-table th:nth-child(4),
+.compact-evidence-table th:nth-child(5),
+.compact-evidence-table th:nth-child(6) {
+  width: auto;
+}
+
+.token-cell {
+  min-width: 64px;
+  font-size: 14px;
+}
+
+.pos-compact {
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.evidence-status,
+.compact-evidence-table .pill {
+  white-space: nowrap;
+}
+
+@media (max-width: 1050px) {
+  .analyze-page {
+    width: min(100% - 24px, 960px);
+  }
+
+  .capability-tool-grid,
+  .capability-tool-grid.layout-morphology,
+  .capability-tool-grid.layout-syntax,
+  .capability-tool-grid.layout-support,
+  .capability-tool-grid.layout-contextual {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .capability-group-head {
+    align-items: flex-start;
+  }
+
+  .compact-evidence-table td {
+    grid-template-columns: 108px minmax(0, 1fr);
+  }
+}
+
+
+/* Capability-specific analyzer tables */
+.capability-specific-table table {
+  table-layout: auto;
+}
+
+.capability-specific-table th,
+.capability-specific-table td {
+  padding: 10px 12px;
+}
+
+.capability-specific-table th {
+  white-space: nowrap;
+}
+
+.compact-primary-value {
+  display: inline-block;
+  min-width: 24px;
+}
+
+.dependency-value,
+.contextual-value {
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.capability-specific-table .pos-compact {
+  background: var(--c-accent-light);
+  color: var(--c-accent-text);
+}
+
+@media (max-width: 760px) {
+  .capability-specific-table table,
+  .capability-specific-table thead,
+  .capability-specific-table tbody,
+  .capability-specific-table tr,
+  .capability-specific-table th,
+  .capability-specific-table td {
+    display: block;
+  }
+
+  .capability-specific-table thead {
+    display: none;
+  }
+
+  .capability-specific-table tr {
+    padding: 12px;
+    border-bottom: 1px solid var(--c-border);
+  }
+
+  .capability-specific-table td {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 0;
+  }
+
+  .capability-specific-table td::before {
+    content: attr(data-label);
+    color: var(--c-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .capability-specific-table td:first-child::before {
+    content: "Token";
+  }
+}
+
 </style>
 
 

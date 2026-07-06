@@ -3,9 +3,9 @@
     <section class="hero-band dashboard-hero">
       <div class="hero-content">
         <span class="eyebrow">Dashboard</span>
-        <h1 class="hero-title">Comparative Arabic NLP Platform</h1>
+        <h1 class="hero-title">Arabic NLP Research Workbench</h1>
         <p class="hero-copy">
-          A research-grade workspace for tool health, benchmark runs, comparison, fusion, and evaluation.
+          A research workbench for analyzer evidence, capability-aware comparison, expert fusion, and evaluation.
           Arabic is reserved for input and linguistic output, while the interface stays in English.
         </p>
         <div class="actions-row">
@@ -18,7 +18,7 @@
       <div class="hero-panel">
         <article class="hero-stat hero-stat--accent">
           <strong>{{ dashboardMetrics.activeTools }}</strong>
-          <span>Active tools</span>
+          <span>Available analyzers</span>
         </article>
         <article class="hero-stat">
           <strong>{{ dashboardMetrics.tasks }}</strong>
@@ -26,7 +26,7 @@
         </article>
         <article class="hero-stat">
           <strong>{{ dashboardMetrics.healthLabel }}</strong>
-          <span>System health</span>
+          <span>Operational state</span>
         </article>
       </div>
     </section>
@@ -36,10 +36,10 @@
         <div class="section-head">
           <div>
             <h2 class="section-title">Live Platform Summary</h2>
-            <p class="section-subtitle">Values update from backend health checks and a built-in benchmark sentence.</p>
+            <p class="section-subtitle">Values update from backend health checks and a built-in evaluation sample sentence.</p>
           </div>
-          <button class="btn btn-secondary" :disabled="statusLoading || benchmarkLoading" @click="refreshDashboard">
-            {{ statusLoading || benchmarkLoading ? 'Refreshing...' : 'Refresh' }}
+          <button class="btn btn-secondary" :disabled="statusLoading || evaluationSampleLoading" @click="refreshDashboard">
+            {{ statusLoading || evaluationSampleLoading ? 'Refreshing...' : 'Refresh' }}
           </button>
         </div>
 
@@ -65,48 +65,48 @@
         </div>
       </article>
 
-      <aside class="panel panel-pad benchmark-panel">
+      <aside class="panel panel-pad evaluation-sample-panel">
         <div class="section-head">
           <div>
-            <h2 class="section-title">Benchmark Run</h2>
-            <p class="section-subtitle">{{ benchmarkLabel }}</p>
+            <h2 class="section-title">Evaluation Sample Run</h2>
+            <p class="section-subtitle">{{ evaluationSampleLabel }}</p>
           </div>
         </div>
 
-        <div v-if="benchmarkLoading" class="loading-state benchmark-loading">
+        <div v-if="evaluationSampleLoading" class="loading-state evaluation-sample-loading">
           <span class="spinner--dark" aria-hidden="true"></span>
           <p>Running the reference sentence through fusion and evaluation...</p>
         </div>
 
-        <div v-else class="benchmark-stack">
+        <div v-else class="evaluation-sample-stack">
           <article class="metric-strip">
             <div class="metric-strip-head">
-              <span class="metric-label">Average agreement</span>
-              <strong>{{ benchmark.agreement }}</strong>
+              <span class="metric-label">Core readiness</span>
+              <strong>{{ evaluationSample.agreement }}</strong>
             </div>
-            <div class="progress-track"><span :style="{ width: benchmark.agreementWidth }"></span></div>
+            <div class="progress-track"><span :style="{ width: evaluationSample.agreementWidth }"></span></div>
           </article>
 
           <article class="metric-strip">
             <div class="metric-strip-head">
-              <span class="metric-label">Average confidence</span>
-              <strong>{{ benchmark.confidence }}</strong>
+              <span class="metric-label">Tool availability</span>
+              <strong>{{ evaluationSample.confidence }}</strong>
             </div>
-            <div class="progress-track"><span :style="{ width: benchmark.confidenceWidth }"></span></div>
+            <div class="progress-track"><span :style="{ width: evaluationSample.confidenceWidth }"></span></div>
           </article>
 
           <article class="metric-strip">
             <div class="metric-strip-head">
               <span class="metric-label">Response time</span>
-              <strong>{{ benchmark.responseTime }}</strong>
+              <strong>{{ evaluationSample.responseTime }}</strong>
             </div>
-            <div class="progress-track"><span :style="{ width: benchmark.responseWidth }"></span></div>
+            <div class="progress-track"><span :style="{ width: evaluationSample.responseWidth }"></span></div>
           </article>
 
           <article class="metric-strip">
-            <span class="metric-label">Benchmark status</span>
-            <span :class="['pill', benchmark.statusClass]">{{ benchmark.status }}</span>
-            <p class="metrics-note">{{ benchmark.note }}</p>
+            <span class="metric-label">Evaluation sample status</span>
+            <span :class="['pill', evaluationSample.statusClass]">{{ evaluationSample.status }}</span>
+            <p class="metrics-note">{{ evaluationSample.note }}</p>
           </article>
         </div>
       </aside>
@@ -184,20 +184,20 @@
 
       <ScientificChart
         type="bar"
-        title="Benchmark Snapshot"
-        subtitle="Agreement, confidence, and latency from the active reference run."
-        badge="Benchmark"
-        :labels="benchmarkChart.labels"
-        :datasets="benchmarkChart.datasets"
+        title="Evaluation Sample Snapshot"
+        subtitle="Core readiness, tool availability, and endpoint latency from the health snapshot."
+        badge="Evaluation sample"
+        :labels="evaluationSampleChart.labels"
+        :datasets="evaluationSampleChart.datasets"
         :height="260"
-        aria-label="Benchmark snapshot bar chart"
-        empty-title="Waiting for benchmark data"
-        empty-text="Run the benchmark once to populate the research summary."
+        aria-label="Evaluation sample snapshot bar chart"
+        empty-title="Waiting for evaluation sample data"
+        empty-text="Run the evaluation sample once to populate the research summary."
       />
 
       <ScientificChart
         type="radar"
-        title="Group Coverage"
+        title="Analyzer participation by role"
         subtitle="Morphology, syntax, and segmentation coverage."
         badge="Coverage"
         :labels="groupCoverageChart.labels"
@@ -239,7 +239,7 @@
         <div class="section-head">
           <div>
             <h2 class="section-title">Available Corpora</h2>
-            <p class="section-subtitle">Files and benchmark sets already present in the project workspace.</p>
+            <p class="section-subtitle">Files and evaluation sample sets already present in the project workspace.</p>
           </div>
         </div>
 
@@ -283,7 +283,7 @@
         <div class="section-head">
           <div>
             <h2 class="section-title">Quick Actions</h2>
-            <p class="section-subtitle">Fast navigation for defense-day workflows.</p>
+            <p class="section-subtitle">Direct access to the main research workflows.</p>
           </div>
         </div>
 
@@ -298,11 +298,11 @@
           </RouterLink>
           <RouterLink to="/smart" class="quick-action-card">
             <strong>Evidence fusion</strong>
-            <span>See why each value won the vote.</span>
+            <span>Inspect selected sources and supporting evidence.</span>
           </RouterLink>
           <RouterLink to="/evaluate" class="quick-action-card">
-            <strong>Scientific report</strong>
-            <span>Check benchmark and coverage summaries.</span>
+            <strong>Capability evaluation</strong>
+            <span>Inspect capability-scoped agreement and conflict evidence.</span>
           </RouterLink>
         </div>
       </article>
@@ -325,9 +325,9 @@ const DASHBOARD_READY_STATUSES = new Set(['ok', 'partial', 'lazy', 'loading'])
 const DASHBOARD_CORE_TOOLS = ['camel', 'farasa', 'qalsadi', 'alkhalil', 'udpipe']
 const DASHBOARD_HEAVY_TOOLS = new Set(['stanza', 'arabert', 'sinatools'])
 
-const benchmarkLoading = ref(true)
-const benchmarkLabel = ref('Loading a lightweight tool health snapshot...')
-const benchmark = ref({
+const evaluationSampleLoading = ref(true)
+const evaluationSampleLabel = ref('Loading a lightweight tool health snapshot...')
+const evaluationSample = ref({
   agreement: '0%',
   agreementWidth: '0%',
   confidence: '0%',
@@ -336,9 +336,9 @@ const benchmark = ref({
   responseWidth: '0%',
   status: 'Pending',
   statusClass: 'pill-gray',
-  note: 'Waiting for the first benchmark run.',
+  note: 'Waiting for the first evaluation sample run.',
 })
-const benchmarkMetrics = ref({
+const evaluationSampleMetrics = ref({
   agreement: 0,
   confidence: 0,
   responseTimeMs: 0,
@@ -394,12 +394,12 @@ const groupHealth = computed(() =>
 const readinessBars = computed(() => [
   { label: 'Tools', value: `${activeToolCount.value}/${totalTools.value}`, height: Math.max(30, Math.round((activeToolCount.value / Math.max(totalTools.value, 1)) * 120)) },
   { label: 'Tasks', value: `${supportedTasks.value}`, height: Math.max(30, Math.round(Math.min(1, supportedTasks.value / 12) * 120)) },
-  { label: 'Health', value: benchmarkMetrics.value.ok ? 'OK' : 'Booting', height: Math.max(30, Math.round((benchmarkMetrics.value.ok ? 1 : 0.4) * 120)) },
+  { label: 'Health', value: evaluationSampleMetrics.value.ok ? 'OK' : 'Booting', height: Math.max(30, Math.round((evaluationSampleMetrics.value.ok ? 1 : 0.4) * 120)) },
 ])
 
 const metrics = computed(() => [
   {
-    label: 'Active tools',
+    label: 'Available analyzers',
     value: String(activeToolCount.value),
     note: `${activeToolCount.value} online, ${totalTools.value - activeToolCount.value} offline or partial.`,
     className: 'score-high',
@@ -411,64 +411,64 @@ const metrics = computed(() => [
     className: 'score-medium',
   },
   {
-    label: 'Average agreement',
-    value: benchmark.value.agreement,
-    note: 'Core-tool readiness from the lightweight health check.',
-    className: scoreClass(benchmarkMetrics.value.agreement),
+    label: 'Core readiness',
+    value: evaluationSample.value.agreement,
+    note: 'Share of configured core analyzers in a ready state.',
+    className: scoreClass(evaluationSampleMetrics.value.agreement),
   },
   {
-    label: 'Average confidence',
-    value: benchmark.value.confidence,
-    note: 'Registered-tool readiness from the same health snapshot.',
-    className: scoreClass(benchmarkMetrics.value.confidence),
+    label: 'Tool availability',
+    value: evaluationSample.value.confidence,
+    note: 'Share of registered analyzers currently available.',
+    className: scoreClass(evaluationSampleMetrics.value.confidence),
   },
   {
     label: 'Response time',
-    value: benchmark.value.responseTime,
+    value: evaluationSample.value.responseTime,
     note: 'Round trip for the dashboard health endpoint.',
     className: 'score-medium',
   },
   {
-    label: 'System health',
-    value: benchmark.value.status,
+    label: 'Operational state',
+    value: evaluationSample.value.status,
     note: 'Combines backend availability and tool readiness.',
-    className: benchmark.value.statusClass,
+    className: evaluationSample.value.statusClass,
   },
 ])
 
 const capabilities = computed(() => [
   { label: 'Running services', value: `${activeToolCount.value}/${totalTools.value}`, note: 'The dashboard reflects live startup detection.' },
   { label: 'Supported tasks', value: `${supportedTasks.value}`, note: 'Morphology, segmentation, syntax, and lexical evidence.' },
-  { label: 'Benchmark status', value: benchmark.value.status, note: 'The dashboard uses a lightweight health snapshot automatically.' },
-  { label: 'Evaluation summary', value: benchmark.value.agreement, note: 'Readiness ratios are pulled from backend health endpoints.' },
-  { label: 'Average latency', value: benchmark.value.responseTime, note: 'Useful for presenting deployment readiness to reviewers.' },
+  { label: 'Evaluation sample status', value: evaluationSample.value.status, note: 'The dashboard uses a lightweight health snapshot automatically.' },
+  { label: 'Evaluation summary', value: evaluationSample.value.agreement, note: 'Readiness ratios are pulled from backend health endpoints.' },
+  { label: 'Average latency', value: evaluationSample.value.responseTime, note: 'Useful for presenting deployment readiness to reviewers.' },
   { label: 'Corpus sets', value: String(corpora.value.length), note: 'Workspace datasets and exported experiment files.' },
 ])
 
 const corpora = ref([
-  { name: 'evaluate_dataset.json', description: 'Evaluation samples used by the project benchmarking workflow.' },
+  { name: 'evaluate_dataset.json', description: 'Evaluation samples used by the project evaluation workflow.' },
   { name: 'export_dataset.json', description: 'Export-ready structured data for comparison and reporting.' },
-  { name: 'benchmark_progress.jsonl', description: 'Incremental benchmark progress log for reproducibility.' },
+  { name: 'benchmark_progress.jsonl', description: 'Incremental evaluation progress log for reproducibility.' },
 ])
 
 const recentAnalyses = ref(readAnalysisHistory())
 
 async function refreshDashboard() {
-  benchmarkLoading.value = true
-  benchmarkLabel.value = 'Refreshing lightweight health metrics...'
+  evaluationSampleLoading.value = true
+  evaluationSampleLabel.value = 'Refreshing lightweight health metrics...'
 
   try {
     await refresh()
-    await runBenchmark()
+    await runEvaluationSample()
   } finally {
-    benchmarkLoading.value = false
-    benchmarkLabel.value = benchmarkMetrics.value.ok
+    evaluationSampleLoading.value = false
+    evaluationSampleLabel.value = evaluationSampleMetrics.value.ok
       ? 'Live health data captured from the backend.'
       : 'Tool health is degraded, but the backend remains usable.'
   }
 }
 
-async function runBenchmark() {
+async function runEvaluationSample() {
   const started = performance.now()
   try {
     const healthResult = await getDemoToolHealth(false)
@@ -487,14 +487,14 @@ async function runBenchmark() {
     const confidenceScore = registeredTools.length ? readyTools.length / registeredTools.length : 0
     const healthDegraded = excluded > 0 || degraded > 0
 
-    benchmarkMetrics.value = {
+    evaluationSampleMetrics.value = {
       agreement: agreementScore,
       confidence: confidenceScore,
       responseTimeMs: Math.round(finished - started),
       ok: !healthDegraded,
     }
 
-    benchmark.value = {
+    evaluationSample.value = {
       agreement: `${Math.round(agreementScore * 100)}%`,
       agreementWidth: `${Math.round(agreementScore * 100)}%`,
       confidence: `${Math.round(confidenceScore * 100)}%`,
@@ -507,13 +507,13 @@ async function runBenchmark() {
     }
   } catch (error) {
     const finished = performance.now()
-    benchmarkMetrics.value = {
+    evaluationSampleMetrics.value = {
       agreement: 0,
       confidence: 0,
       responseTimeMs: Math.round(finished - started),
       ok: false,
     }
-    benchmark.value = {
+    evaluationSample.value = {
       agreement: '0%',
       agreementWidth: '0%',
       confidence: '0%',
@@ -522,7 +522,7 @@ async function runBenchmark() {
       responseWidth: '22%',
       status: 'Degraded',
       statusClass: 'pill-amber',
-      note: error?.message || 'The benchmark request could not complete on this machine.',
+      note: error?.message || 'The evaluation sample request could not complete on this machine.',
     }
   }
 }
@@ -589,10 +589,10 @@ async function refreshStatusOnly() {
 
 async function initializeDashboard() {
   await refreshStatusOnly()
-  benchmarkLoading.value = true
-  await runBenchmark()
-  benchmarkLoading.value = false
-  benchmarkLabel.value = benchmarkMetrics.value.ok
+  evaluationSampleLoading.value = true
+  await runEvaluationSample()
+  evaluationSampleLoading.value = false
+  evaluationSampleLabel.value = evaluationSampleMetrics.value.ok
     ? 'Live health data captured from the backend.'
     : 'Tool health is degraded, but the dashboard remains usable.'
 }
@@ -606,7 +606,7 @@ const handleHistoryUpdate = () => refreshRecentAnalyses()
 const dashboardMetrics = computed(() => ({
   activeTools: activeToolCount.value,
   tasks: supportedTasks.value,
-  healthLabel: benchmarkMetrics.value.ok ? 'Healthy' : 'Degraded',
+  healthLabel: evaluationSampleMetrics.value.ok ? 'Healthy' : 'Degraded',
 }))
 
 const healthSummary = computed(() => {
@@ -633,15 +633,15 @@ const toolAvailabilityChart = computed(() => {
   }
 })
 
-const benchmarkChart = computed(() => ({
-  labels: ['Agreement', 'Confidence', 'Latency'],
+const evaluationSampleChart = computed(() => ({
+  labels: ['Core readiness', 'Tool availability', 'Latency'],
   datasets: [
     {
-      label: 'Benchmark',
+      label: 'Evaluation sample',
       data: [
-        Math.round(benchmarkMetrics.value.agreement * 100),
-        Math.round(benchmarkMetrics.value.confidence * 100),
-        Math.max(0, 100 - Math.min(100, Math.round(benchmarkMetrics.value.responseTimeMs / 12))),
+        Math.round(evaluationSampleMetrics.value.agreement * 100),
+        Math.round(evaluationSampleMetrics.value.confidence * 100),
+        Math.max(0, 100 - Math.min(100, Math.round(evaluationSampleMetrics.value.responseTimeMs / 12))),
       ],
       backgroundColor: ['#4F46E5', '#14B8A6', '#D97706'],
     },
@@ -737,7 +737,7 @@ onUnmounted(() => {
 }
 
 .summary-panel,
-.benchmark-panel,
+.evaluation-sample-panel,
 .chart-panel,
 .capability-panel,
 .services-panel,
@@ -749,11 +749,11 @@ onUnmounted(() => {
   min-height: 146px;
 }
 
-.benchmark-loading {
+.evaluation-sample-loading {
   min-height: 300px;
 }
 
-.benchmark-stack {
+.evaluation-sample-stack {
   display: grid;
   gap: 12px;
 }

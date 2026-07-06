@@ -1,100 +1,120 @@
 import { TOOL_COLORS } from '@/constants/designTokens'
 
+function tool(key, meta) {
+  const visual = TOOL_COLORS[key] || {}
+  return {
+    key,
+    label: visual.label || key,
+    color: visual.border || '#64748B',
+    group: visual.group || 'unknown',
+    groupLabel: visual.groupLabel || 'Unknown',
+    ...meta,
+  }
+}
+
 export const TOOL_CONFIG = {
-  camel: {
-    label: 'CAMeL Tools',
-    color: TOOL_COLORS.camel.border,
-    group: TOOL_COLORS.camel.group,
-    type: 'Hybrid Rule + Neural',
+  camel: tool('camel', {
+    type: 'Hybrid morphological analysis',
     license: 'MIT',
-    features: ['Lemma', 'Root', 'POS', 'Morphology', 'Gloss'],
+    features: ['Lemma', 'Root', 'POS', 'Morphological features', 'Gloss'],
     paper: 'Obeid et al. 2020, ACL',
     provides: ['lemma', 'root', 'pos', 'gender', 'number', 'tense', 'gloss'],
-  },
-  farasa: {
-    label: 'Farasa',
-    color: TOOL_COLORS.farasa.border,
-    group: TOOL_COLORS.farasa.group,
-    type: 'Statistical (SVM-rank)',
-    license: 'Free (research)',
-    features: ['Segmentation', 'Diacritization'],
-    paper: 'Abdelali et al. 2016, NAACL',
-    provides: ['segmentation'],
-  },
-  stanza: {
-    label: 'Stanza',
-    color: TOOL_COLORS.stanza.border,
-    group: TOOL_COLORS.stanza.group,
-    type: 'Neural (BiLSTM)',
-    license: 'Apache 2.0',
-    features: ['POS', 'Lemma', 'Dependency', 'Case'],
-    paper: 'Qi et al. 2020, ACL',
-    provides: ['lemma', 'pos', 'case', 'definite', 'dependency'],
-  },
-  qalsadi: {
-    label: 'Qalsadi',
-    color: TOOL_COLORS.qalsadi.border,
-    group: TOOL_COLORS.qalsadi.group,
-    type: 'Rule-based morphological',
-    license: 'LGPL',
-    features: ['Lemma', 'Stem'],
-    paper: 'Zerrouki 2017',
-    provides: ['lemma', 'stem'],
-  },
-  arabert: {
-    label: 'AraBERT',
-    color: TOOL_COLORS.camel.border,
-    group: TOOL_COLORS.camel.group,
-    type: 'Neural (BERT)',
-    license: 'Apache 2.0',
-    features: ['POS', 'NER', 'Contextual embeddings'],
-    paper: 'Antoun et al. 2020, LREC',
-    provides: ['lemma', 'pos'],
-  },
-  alkhalil: {
-    label: 'AlKhalil',
-    color: TOOL_COLORS.alkhalil.border,
-    group: TOOL_COLORS.alkhalil.group,
-    type: 'Rule-based',
-    license: 'Free (research)',
-    features: ['Root extraction', 'Full morphology'],
+    researchRole: 'Primary lexical and morphological evidence',
+  }),
+  alkhalil: tool('alkhalil', {
+    type: 'Rule-based morphology',
+    license: 'Free for research',
+    features: ['Lemma', 'Root', 'Morphological analysis'],
     paper: 'Boudchiche et al. 2017',
     provides: ['lemma', 'root', 'pos'],
-  },
-  udpipe: {
-    label: 'UDPipe 2',
-    color: TOOL_COLORS.udpipe.border,
-    group: TOOL_COLORS.udpipe.group,
-    type: 'Neural (transition-based)',
+    researchRole: 'Rule-based morphological support',
+  }),
+  sinatools: tool('sinatools', {
+    type: 'Lexical and morphological NLP',
+    license: 'MIT',
+    features: ['Lemmatization', 'POS tagging', 'Lexical evidence'],
+    paper: 'Jarrar et al., Birzeit University',
+    provides: ['lemma', 'pos', 'root'],
+    researchRole: 'Optional lexical-morphology evidence when local resources are loaded',
+  }),
+  madamira: tool('madamira', {
+    type: 'Statistical + rule-based morphology',
+    license: 'LDC / research',
+    features: ['Morphology', 'Diacritization', 'POS'],
+    paper: 'Pasha et al. 2014, LREC',
+    provides: ['lemma', 'pos', 'gender', 'number'],
+    researchRole: 'Optional morphological analyzer; excluded when not configured',
+  }),
+  stanza: tool('stanza', {
+    type: 'Neural UD pipeline',
+    license: 'Apache 2.0',
+    features: ['POS', 'Lemma', 'Dependency', 'Morphological features'],
+    paper: 'Qi et al. 2020, ACL',
+    provides: ['lemma', 'pos', 'case', 'definite', 'dependency'],
+    researchRole: 'UD-oriented syntactic evidence',
+  }),
+  udpipe: tool('udpipe', {
+    type: 'UD parsing pipeline',
     license: 'MPL 2.0',
     features: ['POS', 'Dependency parsing', 'Lemma'],
     paper: 'Straka 2018, CoNLL',
     provides: ['lemma', 'pos', 'dependency'],
-  },
-  madamira: {
-    label: 'MADAMIRA',
-    color: TOOL_COLORS.farasa.border,
-    group: TOOL_COLORS.farasa.group,
-    type: 'Statistical + Rule-based',
-    license: 'LDC (research)',
-    features: ['Full morphology', 'Diacritization', 'POS'],
-    paper: 'Pasha et al. 2014, LREC',
-    provides: ['lemma', 'pos', 'gender', 'number'],
-  },
-  sinatools: {
-    label: 'SinaTools / Alma',
-    color: TOOL_COLORS.farasa.border,
-    group: TOOL_COLORS.farasa.group,
-    type: 'Frequency + BERT',
-    license: 'MIT',
-    features: ['Lemmatization', 'POS tagging', 'NER', 'Word Sense Disambiguation'],
-    paper: 'Jarrar et al. 2022, Birzeit University',
-    provides: ['lemma', 'pos'],
-  },
+    researchRole: 'Independent UD syntax support',
+  }),
+  farasa: tool('farasa', {
+    type: 'Statistical segmentation',
+    license: 'Research use',
+    features: ['Segmentation', 'Clitic boundaries'],
+    paper: 'Abdelali et al. 2016, NAACL',
+    provides: ['segmentation'],
+    researchRole: 'Segmentation anchor',
+  }),
+  qalsadi: tool('qalsadi', {
+    type: 'Rule-based lexical morphology',
+    license: 'LGPL',
+    features: ['Lemma', 'Stem'],
+    paper: 'Zerrouki 2017',
+    provides: ['lemma', 'stem'],
+    researchRole: 'Rule-based lexical support',
+  }),
+  arabert: tool('arabert', {
+    type: 'Contextual Transformer model',
+    license: 'Apache 2.0',
+    features: ['Contextual embeddings', 'Semantic representation'],
+    paper: 'Antoun et al. 2020, LREC',
+    provides: [],
+    researchRole: 'Contextual representation; not a direct morphology table competitor',
+  }),
 }
 
 export const TOOL_KEYS = Object.keys(TOOL_CONFIG)
 
+export const FEATURE_ELIGIBILITY = {
+  segmentation: ['farasa'],
+  lemma: ['camel', 'alkhalil', 'sinatools', 'stanza', 'udpipe', 'qalsadi'],
+  root: ['camel', 'alkhalil', 'sinatools'],
+  pos: ['camel', 'sinatools', 'stanza', 'udpipe', 'alkhalil'],
+  dependency: ['stanza', 'udpipe'],
+}
+
 export function toolOrder(keys = TOOL_KEYS) {
   return keys.filter((key) => TOOL_CONFIG[key])
+}
+
+export function toolMeta(key) {
+  return TOOL_CONFIG[key] || {
+    key,
+    label: key || 'Unknown tool',
+    color: '#64748B',
+    group: 'unknown',
+    groupLabel: 'Unknown',
+    type: 'Optional analyzer',
+    provides: [],
+    researchRole: 'No frontend metadata registered',
+  }
+}
+
+export function eligibleTools(feature, keys = TOOL_KEYS) {
+  const eligible = new Set(FEATURE_ELIGIBILITY[feature] || [])
+  return keys.filter((key) => eligible.has(key))
 }

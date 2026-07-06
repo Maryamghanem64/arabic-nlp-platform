@@ -26,6 +26,12 @@
       </template>
     </div>
 
+    <div v-if="rows.length && cols.length" class="heatmap-legend" aria-label="Agreement intensity legend">
+      <span>Lower agreement</span>
+      <span class="legend-scale" aria-hidden="true"></span>
+      <span>Higher agreement</span>
+    </div>
+
     <div v-else class="heatmap-empty">
       <strong>{{ emptyTitle }}</strong>
       <p>{{ emptyText }}</p>
@@ -60,12 +66,11 @@ function formatValue(value) {
 function cellStyle(value) {
   const normalized = typeof value === 'number' ? Math.max(0, Math.min(1, value)) : Number.parseFloat(String(value).replace('%', '')) / 100
   const safe = Number.isFinite(normalized) ? normalized : 0
-  const hue = Math.round(120 * safe)
-  const lightness = 96 - safe * 28
+  const lightness = 97 - safe * 36
   return {
-    backgroundColor: `hsl(${hue} 78% ${lightness}%)`,
-    color: safe > 0.58 ? '#0F172A' : '#334155',
-    borderColor: `hsla(${hue} 78% 40% / ${0.16 + safe * 0.28})`,
+    backgroundColor: `hsl(211 48% ${lightness}%)`,
+    color: safe > 0.62 ? '#FFFFFF' : '#1E3A5F',
+    borderColor: `hsla(211 48% 34% / ${0.14 + safe * 0.34})`,
   }
 }
 </script>
@@ -169,4 +174,21 @@ function cellStyle(value) {
 .heatmap-empty p {
   margin: 6px 0 0;
 }
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--c-text-secondary);
+  font-size: .72rem;
+}
+.legend-scale {
+  width: 112px;
+  height: 8px;
+  border: 1px solid rgba(49, 92, 140, .18);
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(211 48% 97%), hsl(211 48% 61%));
+}
+
 </style>

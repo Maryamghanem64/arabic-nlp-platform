@@ -125,6 +125,10 @@ def _build_token(
     surface_token_score: Optional[float] = None,
     top_candidate_score: Optional[float] = None,
 ) -> Dict[str, Any]:
+    unsupported_note = (
+        "AraBERT base model does not provide lemma/root/POS without a fine-tuned head."
+    )
+
     return {
         "surface": surface,
         "lemma": None,
@@ -147,9 +151,31 @@ def _build_token(
             "model": _ARABERT_MODEL_ID,
             "method": "fill-mask",
             "role": "contextual support / disambiguation",
+            "morphology_supported": False,
+            "supported_features": ["contextual"],
+            "unsupported_features": [
+                "lemma",
+                "root",
+                "pos",
+                "segmentation",
+                "dependency",
+            ],
+            "display_note": unsupported_note,
             "candidates": candidates or [],
-            "surface_token_score": None if surface_token_score is None else round(float(surface_token_score), 6),
-            "top_candidate_score": None if top_candidate_score is None else round(float(top_candidate_score), 6),
+            "surface_token_score": None
+            if surface_token_score is None
+            else round(float(surface_token_score), 6),
+            "top_candidate_score": None
+            if top_candidate_score is None
+            else round(float(top_candidate_score), 6),
+        },
+        "capabilities": {
+            "contextual": True,
+            "lemma": False,
+            "root": False,
+            "pos": False,
+            "segmentation": False,
+            "dependency": False,
         },
         "analyses": [
             {
@@ -163,6 +189,7 @@ def _build_token(
             }
         ],
     }
+
 
 
 def _normalize_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
