@@ -1,12 +1,47 @@
+# Local environment configuration
 .env
-.venv/
+.env.*
+!.env.example
+
+# Python environments and generated files
 venv/
+.venv/
+env/
 __pycache__/
-*.pyc
-*.log
+*.py[cod]
+*.pyd
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Vue / Vite
 frontend/node_modules/
 frontend/dist/
+
+# Editors (keep shared extension recommendations)
+**/.vscode/*
+!**/.vscode/extensions.json
+.idea/
+
+# Operating system files
 .DS_Store
-# SinaTools large data file
+Thumbs.db
+
+# Logs, caches, and crash output
+*.log
+logs/
+.cache/
+.tmp/
+hs_err_pid*.log
+
+# Reproducible local analysis output
+/Alkhalil_Results.html
+/benchmark_progress.jsonl
+/combined.json
+/export.json
+/tmp_*.py
+
+# SinaTools large local data file
 app/tools/sinatools/lemmas_dic.pickle
