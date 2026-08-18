@@ -15,9 +15,13 @@ This guide matches the current repository setup scripts and dependency files.
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\pip.exe install -r requirements.txt
+Copy-Item .env.example .env
 .\.venv\Scripts\python.exe install_models.py
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --env-file .env
 ```
+
+Keep `.env` local. It contains machine-specific analyzer paths and model settings;
+`.env.example` is the safe template committed to the repository.
 
 ## Frontend Setup
 

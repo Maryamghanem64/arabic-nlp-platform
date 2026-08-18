@@ -100,9 +100,14 @@ Recommended UI wording discipline:
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\pip.exe install -r requirements.txt
+Copy-Item .env.example .env
 .\.venv\Scripts\python.exe install_models.py
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --env-file .env
 ```
+
+The variables in `.env` are optional local paths/model settings. Keep `.env` local and
+commit only `.env.example`. On macOS or Linux, use `cp .env.example .env` and activate
+the environment with `source .venv/bin/activate` if preferred.
 
 ### Frontend
 
